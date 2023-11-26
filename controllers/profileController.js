@@ -1,0 +1,753 @@
+const express = require('express');
+const app = express();
+const { db, storage } = require('../firebase'); // Importa solo la variable storage de esta manera
+const { getDownloadURL } = require('@firebase/storage');
+const { getStorage, ref, uploadBytesResumable } = require('@firebase/storage');
+
+const admin = require('firebase-admin');
+const Profile = require('../models/profile');
+const bodyParser = require('body-parser');
+const sharp = require('sharp');
+app.use(bodyParser.json());
+
+const jwt = require('jsonwebtoken');
+const secretKey = 'tu_secreto_secreto';
+
+const createProfile = async (req, res) => {
+  try {
+    const profilesRef = db.collection('profiles');
+    const metadataRef = db.collection('metadata').doc('lastProfileNumber');
+
+    // Inicia una transacción para asegurarte de obtener y actualizar el último número de perfil de manera segura.
+    await db.runTransaction(async (transaction) => {
+      // Obtiene el último número de perfil
+      const metadataDoc = await transaction.get(metadataRef);
+      const lastProfileNumber = metadataDoc.data().value;
+
+      // Calcula el nuevo número de perfil
+      const newProfileNumber = lastProfileNumber + 1;
+
+      // Actualiza el documento "lastProfileNumber" en metadata con el nuevo número
+      transaction.update(metadataRef, { value: newProfileNumber });
+
+      // Crea el ID de perfil con el nuevo número
+      const newProfileId = `profile-${newProfileNumber}`;
+
+      // Resto de los campos del perfil
+      const profileData = {
+        profileId: newProfileId,
+        cardSerialNumber: req.body.cardSerialNumber,
+        membershipId: req.body.membershipId,
+        gymId: req.body.gymId,
+        profileStartDate: req.body.profileStartDate,
+        profileEndDate: req.body.profileEndDate,
+        //profileRenewDate: req.body.profileRenewDate,
+        profileIsAdmin: req.body.profileIsAdmin,
+        profileAdminLevel: req.body.profileAdminLevel,
+        profileName: req.body.profileName,
+        profileLastname: req.body.profileLastname,
+        profileEmail: req.body.profileEmail,
+        profileBirthday:
+          req.body.profileBirthday !== undefined
+            ? req.body.profileBirthday
+            : '',
+        profileTelephoneNumber: req.body.profileTelephoneNumber,
+        profileFile: req.body.profileFile !== null ? req.body.profileFile : '',
+        profileFileWasUpload: req.body.profileFileWasUpload,
+        profilePicture: req.body.profilePicture,
+        profileStatus: req.body.profileStatus,
+        profilePostalCode:
+          req.body.profilePostalCode !== null ? req.body.profilePostalCode : '',
+        profileAddress: req.body.profileAddress,
+        profileCity: req.body.profileCity,
+        profileCountry: req.body.profileCountry,
+        notCheckOut: req.body.notCheckOut,
+        wasCheckIn: req.body.wasCheckIn,
+        role: 'member',
+        profileGender: req.body.profileGender,
+      };
+
+      // Crea el nuevo perfil
+      await profilesRef.doc(newProfileId).set(profileData);
+
+      const membershipsRef = db.collection('memberships');
+      const membershipSnapshot = await membershipsRef
+        .doc(req.body.membershipId) // Utilizar el membershipId del perfil
+        .get();
+
+      // Verificar si se encontró el membership y obtener el precio
+      let paymentAmount = 0;
+      if (membershipSnapshot.exists) {
+        const membershipData = membershipSnapshot.data();
+        paymentAmount = membershipData.price || 0; // Establecer el precio como paymentAmount
+      }
+
+      const paymentHistoryRef = db.collection('paymentHistory');
+      // Crear un documento en la colección paymentHistory con el paymentAmount
+      const paymentHistoryData = {
+        profileId: newProfileId,
+        membershipId: req.body.membershipId,
+        gymId: req.body.gymId,
+        paymentStartDate: req.body.profileStartDate,
+        paymentEndDate: req.body.profileEndDate,
+        paymentType: 'new',
+        paymentAmount: paymentAmount, // Establecer el paymentAmount obtenido del membership
+        // ... (otros datos relacionados con el pago o historial)
+      };
+
+      await paymentHistoryRef.doc().set(paymentHistoryData);
+
+      // Responde con éxito
+      res
+        .status(201)
+        .json({ message: 'Perfil creado con éxito', profile: profileData });
+    });
+  } catch (error) {
+    console.error('Error al crear el perfil:', error);
+    res.status(500).json({ error: 'Error al crear el perfil' });
+  }
+};
+
+const getAllProfiles = async (req, res) => {
+  try {
+    const gymId = req.query.gymId;
+
+    // Continúa con tu lógica para obtener perfiles y realizar otras operaciones
+    const offset = parseInt(req.query.offset) || 0;
+    const itemsPerPage = parseInt(req.query.itemsPerPage) || 4;
+
+    const getProfilesCollection = db.collection('profiles');
+
+    // Agrega una cláusula where para filtrar por gymId
+    const response = await getProfilesCollection
+      .where('gymId', '==', gymId) // Filtrar perfiles por gymId
+      .where('role', '==', 'member')
+      .limit(itemsPerPage)
+      .offset(offset)
+      .get();
+
+    let profileArray = [];
+    response.forEach((doc) => {
+      const profile = new Profile(
+        doc.data().profileId,
+
+        doc.data().cardSerialNumber,
+        doc.data().membershipId,
+        doc.data().gymId,
+        formatDate(doc.data().profileStartDate), // Formatear fecha de inicio
+        formatDate(doc.data().profileEndDate), // Formatear fecha de fin
+        formatDate(doc.data().profileRenewDate),
+        doc.data().profileIsAdmin,
+        doc.data().profileAdminLevel,
+        doc.data().profileName,
+        doc.data().profileLastname,
+        doc.data().profileEmail,
+        doc.data().profileBirthday,
+        doc.data().profileTelephoneNumber,
+        doc.data().profileFile,
+        doc.data().profileFileWasUpload,
+        doc.data().profilePicture,
+        doc.data().profileStatus,
+        doc.data().profilePostalCode,
+        doc.data().profileAddress,
+        doc.data().profileCity,
+        doc.data().profileCountry,
+        doc.data().profileFrozen,
+        doc.data().profileFrozenDays,
+        formatDate(doc.data().profileFrozenStartDate),
+        formatDate(doc.data().profileUnFreezeStartDate),
+        formatDate(doc.data().profileUnFreezeEndDate),
+        doc.data().profileUnFrozen,
+        doc.data().profileFileName,
+        doc.data().notCheckOut,
+        doc.data().wasCheckIn,
+        doc.data().role,
+        doc.data().profileGender
+        // doc.data().profileFile,
+      );
+
+      profileArray.push(profile);
+    });
+
+    // Envía la respuesta como una matriz de perfiles directamente
+    res.status(200).json(profileArray);
+  } catch (error) {
+    console.error('Error en getAllProfiles:', error);
+    res.status(500).send(error);
+  }
+};
+function formatDate(date) {
+  if (date instanceof Date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  } else if (date && typeof date === 'string') {
+    const parsedDate = new Date(date);
+    if (!isNaN(parsedDate.getTime())) {
+      return formatDate(parsedDate);
+    }
+  }
+  return date; // Devolver tal cual si no es una instancia de Date ni una cadena válida
+}
+
+// const getAllProfiles = async (req, res) => {
+//   try {
+//     // Obtén los parámetros de consulta
+//     const offset = parseInt(req.query.offset) || 0;
+//     const itemsPerPage = parseInt(req.query.itemsPerPage) || 4;
+
+//     const getProfilesCollection = db.collection('profiles');
+//     const response = await getProfilesCollection
+//       .limit(itemsPerPage)
+//       .offset(offset)
+//       .get();
+
+//     let profileArray = [];
+//     response.forEach((doc) => {
+//       const profile = new Profile(
+//         doc.profileId,
+//         doc.data().profileName,
+//         doc.data().profileLastName,
+//         doc.data().profileEmail,
+//         doc.data().profilePlan,
+//         doc.data().profileStatus,
+//         doc.data().profilePhoneNumber,
+//         doc.data().profileImage,
+//         doc.data().profileCode,
+//         doc.data().profileSerialNumber,
+//         doc.data().profileRole,
+//         doc.data().profilePicture
+//       );
+//       profileArray.push(profile);
+//     });
+//     res.send(profileArray);
+//   } catch (error) {
+//     res.status(500).send(error);
+//   }
+// };
+const getProfile = async (req, res) => {
+  try {
+    const getProfile = db.collection('profiles').doc(req.params.id);
+    const response = await getProfile.get();
+
+    // Formatea las fechas antes de enviar la respuesta
+    const formattedProfileData = {
+      ...response.data(),
+      profileFrozenStartDate: formatDate(
+        response.data().profileFrozenStartDate
+      ),
+      profileUnFreezeStartDate: formatDate(
+        response.data().profileUnFreezeStartDate
+      ),
+      profileUnFreezeEndDate: formatDate(
+        response.data().profileUnFreezeEndDate
+      ),
+      profileStartDate: formatDate(response.data().profileStartDate),
+      profileEndDate: formatDate(response.data().profileEndDate),
+    };
+
+    res.send(formattedProfileData);
+  } catch (error) {
+    res.send(error);
+  }
+};
+
+const getProfileByEmail = async (req, res) => {
+  try {
+    const partialEmail = req.body.email; // Obtén el correo electrónico parcial de la solicitud
+    const gymId = req.query.gymId; // Obtén el gymId de la solicitud
+
+    // Realiza una consulta a la colección 'profiles' filtrando por gymId y buscando perfiles que contengan el correo electrónico parcial
+    const querySnapshot = await db
+      .collection('profiles')
+      .where('gymId', '==', gymId) // Filtrar por gymId
+      .where('profileEmail', '>=', partialEmail)
+      .where('profileEmail', '<=', partialEmail + '\uf8ff')
+      .get();
+
+    if (querySnapshot.empty) {
+      // Si no se encuentra ningún perfil con el correo electrónico parcial, responde con un mensaje apropiado
+      res.status(404).json({ message: 'Perfiles no encontrados' });
+    } else {
+      // Si se encuentran perfiles, obtén sus datos
+      const profiles = [];
+      querySnapshot.forEach((doc) => {
+        profiles.push(doc.data());
+      });
+
+      res.json(profiles);
+    }
+  } catch (error) {
+    console.error(
+      'Error al buscar perfiles por correo electrónico parcial:',
+      error
+    );
+    res.status(500).json({
+      error: 'Error al buscar perfiles por correo electrónico parcial',
+    });
+  }
+};
+
+// const createProfile = async (req, res) => {
+//   try {
+//     const body = req.body;
+
+//     // Assuming you want to generate a new document ID for each profile
+//     const profilesCollection = db.collection('profiles');
+//     const newProfileRef = profilesCollection.doc(); // Automatically generates a new document ID
+
+//     await newProfileRef.set(body);
+
+//     res.status(201).json({
+//       message: 'Profile created',
+//       associates: newProfileRef.id, // Return the newly generated profile ID
+//     });
+//   } catch (error) {
+//     console.error('Error creating profile:', error);
+//     res.status(500).json({
+//       message: 'An error occurred while creating the profile',
+//     });
+//   }
+// };
+
+// const uploadFileToStorage = async (fileBuffer, fileName) => {
+//   const file = bucket.file(`Files/${fileName}`);
+
+//   // Upload the file to Cloud Storage
+//   await file.save(fileBuffer, {
+//     metadata: {
+//       contentType: 'application/pdf', // Set the appropriate content type
+//       // Add any additional metadata as needed
+//     },
+//   });
+
+//   const fileUrl = `https://storage.googleapis.com/${bucket.name}/${file.name}`;
+//   return fileUrl;
+// };
+
+const updateProfile = async (req, res) => {
+  try {
+    const { profileCode, formData } = req.body;
+    // console.log(formData);
+
+    // Check if a file is attached in the formData
+    // if (formData.profileFile) {
+    //   const fileUrl = await uploadFileToStorage(
+    //     formData.profileFile.buffer,
+    //     formData.profileFile.name
+    //   );
+    //   formData.profileFile = fileUrl;
+    // }
+
+    const profileRef = admin
+      .firestore()
+      .collection('profiles')
+      .doc(profileCode);
+
+    // Update the document with the data provided in formData
+    await profileRef.update(formData);
+
+    res.json({ message: 'Profile record updated successfully', formData });
+  } catch (error) {
+    console.error('Error updating profile:', error);
+    res
+      .status(500)
+      .json({ error: 'Error updating profile', message: error.message });
+  }
+};
+
+// const profileRef = admin
+// .firestore()
+// .collection('profiles')
+// .doc(profileCode);
+
+// await profileRef.update({ profileFile: fileUrl });
+
+//    res.json({
+//      message: 'Archivo cargado y perfil actualizado con éxito',
+//      fileUrl,
+//    });
+
+const uploadFileToStorage = async (
+  fileBuffer,
+  fileName,
+  contentType,
+  profileCode
+) => {
+  const bucket = admin.storage().bucket(); // Obtén el bucket de almacenamiento
+
+  const folderName = `Files/${profileCode}/`; // Carpeta personalizada para cada usuario
+  const file = bucket.file(`${folderName}${fileName}`);
+
+  // Upload the file to Cloud Storage
+  await file.save(fileBuffer, {
+    metadata: {
+      contentType: contentType, // Establece el tipo de contenido adecuado
+    },
+  });
+
+  return file; // Retornamos el objeto File para obtener la URL de descarga más adelante
+};
+
+const uploadFile = async (req, res) => {
+  try {
+    const { profileCode, profileFileName } = req.body;
+    const file = req.file; // Aquí asumimos que el archivo se encuentra en el campo 'file' de la solicitud
+    console.log(req.body);
+    // Verifica si se adjuntó un archivo en la solicitud
+    if (!file) {
+      return res
+        .status(400)
+        .json({ error: 'No se ha proporcionado un archivo.' });
+    }
+
+    // Determina el tipo de contenido del archivo
+    let contentType;
+
+    if (file.mimetype === 'image/png') {
+      contentType = 'image/png';
+    } else if (file.mimetype === 'image/jpeg') {
+      contentType = 'image/jpeg';
+    } else if (file.mimetype === 'application/pdf') {
+      contentType = 'application/pdf';
+    } else {
+      // Puedes manejar otros tipos de contenido aquí si es necesario
+      return res.status(400).json({ error: 'Tipo de archivo no admitido.' });
+    }
+
+    // Luego, guarda el archivo en el almacenamiento en la nube y obtenemos el objeto File
+    const uploadedFile = await uploadFileToStorage(
+      file.buffer,
+      file.originalname,
+      contentType,
+      profileCode // Pasamos el profileCode para crear la carpeta personalizada
+    );
+
+    // Obtén la URL de descarga del archivo
+    const fileUrl = await uploadedFile.getSignedUrl({
+      action: 'read',
+      expires: '01-01-3000', // Define la fecha de caducidad de la URL
+    });
+
+    const profileRef = admin
+      .firestore()
+      .collection('profiles')
+      .doc(profileCode);
+
+    await profileRef.set(
+      {
+        profileFile: fileUrl,
+        profileFileName: profileFileName,
+        profileFileWasUpload: true,
+      },
+      { merge: true }
+    );
+
+    // Resto de tu lógica aquí...
+  } catch (error) {
+    console.error('Error al cargar el archivo:', error);
+    res
+      .status(500)
+      .json({ error: 'Error al cargar el archivo', message: error.message });
+  }
+};
+
+const deleteFile = async (req, res) => {
+  try {
+    const { profileCode, fileName } = req.query;
+
+    // Verifica si se proporcionó profileCode y fileName
+    if (!profileCode || !fileName) {
+      return res
+        .status(400)
+        .json({ error: 'Se requieren profileCode y fileName.' });
+    }
+
+    const bucket = admin.storage().bucket();
+    const folderName = `Files/${profileCode}/`;
+    const file = bucket.file(`${folderName}${fileName}`);
+
+    // Verifica si el archivo existe antes de intentar eliminarlo
+    const [exists] = await file.exists();
+    if (!exists) {
+      return res.status(404).json({ error: 'El archivo no existe.' });
+    }
+
+    // Elimina el archivo
+    await file.delete();
+    const profileRef = admin
+      .firestore()
+      .collection('profiles')
+      .doc(profileCode);
+
+    const updateObj = {
+      profileFile: admin.firestore.FieldValue.delete(),
+      profileFileWasUpload: false,
+    };
+
+    // Actualiza el documento para eliminar el campo profileFile
+    await profileRef.update(updateObj);
+
+    // Resto de la lógica si es necesario, por ejemplo, actualizar la referencia en Firestore
+
+    return res.status(200).json({ message: 'Archivo eliminado con éxito.' });
+  } catch (error) {
+    console.error('Error al eliminar el archivo:', error);
+    return res
+      .status(500)
+      .json({ error: 'Error al eliminar el archivo', message: error.message });
+  }
+};
+
+const freezeMembership = async (req, res) => {
+  try {
+    const {
+      profileId,
+      profileFrozen,
+      profileFrozenStartDate,
+      profileFrozenDays,
+    } = req.body;
+
+    // Verifica que el perfil exista y realice las validaciones necesarias
+
+    // Actualiza los campos en el perfil seleccionado
+    await db.collection('profiles').doc(profileId).update({
+      profileFrozen: profileFrozen,
+      profileFrozenStartDate: profileFrozenStartDate,
+      profileFrozenDays: profileFrozenDays,
+      profileStatus: false,
+      profileUnFrozen: false,
+    });
+
+    // Responde con éxito
+    res.status(200).json({ message: 'Membership frozen successfully' });
+  } catch (error) {
+    console.error('Error freezing membership:', error);
+    res.status(500).json({ error: 'Error freezing membership' });
+  }
+};
+
+const unfreezeMembership = async (req, res) => {
+  try {
+    const { profileId, profileUnFreezeStartDate, profileUnFreezeEndDate } =
+      req.body;
+    const formattedUnfreezeEndDate = new Date(profileUnFreezeEndDate)
+      .toISOString()
+      .split('T')[0];
+
+    // Actualiza los campos en el perfil seleccionado para descongelar la membresía y establece las fechas de descongelación
+    await db.collection('profiles').doc(profileId).update({
+      profileFrozen: false, // Establece profileFrozen en false para descongelar
+      //profileFrozenStartDate: '', // Establece profileFrozenStartDate en null
+      profileFrozenDays: 0, // Establece profileFrozenDays en null
+      profileUnFreezeStartDate: profileUnFreezeStartDate, // Almacena profileUnFreezeStartDate
+      profileEndDate: formattedUnfreezeEndDate, // Almacena profileUnFreezeEndDate
+      profileStatus: true,
+      profileUnFrozen: true,
+    });
+
+    // Responde con éxito
+    res.status(200).json({ message: 'Membership unfrozen successfully' });
+  } catch (error) {
+    console.error('Error unfreezing membership:', error);
+    res.status(500).json({ error: 'Error unfreezing membership' });
+  }
+};
+
+const checkCardAvailability = async (req, res) => {
+  const cardSerialNumber = req.body.cardSerialNumber;
+
+  try {
+    const cardRef = db.collection('cards').doc(cardSerialNumber);
+    const cardDoc = await cardRef.get();
+
+    if (!cardDoc.exists) {
+      return res.status(404).json({ error: 'Card not found' });
+    }
+
+    const cardData = cardDoc.data();
+
+    if (cardData.cardStatus === 'inactive') {
+      // El cardSerialNumber está inactivo, actualízalo a "active".
+      await cardRef.update({ cardStatus: 'active' });
+      return res.status(200).json({ message: 'Card updated to active' });
+    } else if (cardData.cardStatus === 'active') {
+      return res.status(403).json({ error: 'This Card is already in use' });
+    }
+  } catch (error) {
+    console.error('Error checking card availability:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+const checkCardForUpdated = async (req, res) => {
+  const cardSerialNumber = req.body.cardSerialNumber;
+  const profileId = req.body.profileCode;
+
+  if (!cardSerialNumber) {
+    return res.status(400).json({ error: 'Card serial number is required' });
+  }
+  try {
+    const cardRef = db.collection('cards').doc(cardSerialNumber);
+    const cardDoc = await cardRef.get();
+
+    if (!cardDoc.exists) {
+      return res.status(404).json({ error: 'Card not found' });
+    }
+
+    const cardData = cardDoc.data();
+
+    const userRef = db.collection('profiles').doc(profileId);
+    const userDoc = await userRef.get();
+
+    if (!userDoc.exists) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const userData = userDoc.data();
+    const previousCardSerialNumber = userData.cardSerialNumber;
+
+    if (cardData.cardStatus === 'active') {
+      if (userData.cardSerialNumber === cardSerialNumber) {
+        // El usuario está actualizando su perfil con el mismo cardSerialNumber, permite la actualización.
+        return res.status(200).json({
+          message: 'User is updating profile with the same cardSerialNumber',
+        });
+      } else {
+        return res.status(404).json({ error: 'This Card is already in use' });
+      }
+    }
+
+    if (previousCardSerialNumber) {
+      const previousCardRef = db
+        .collection('cards')
+        .doc(previousCardSerialNumber);
+      await previousCardRef.update({ cardStatus: 'inactive' });
+    }
+    // Si llegamos a este punto, la nueva tarjeta está disponible y podemos actualizar su estado.
+    await cardRef.update({ cardStatus: 'active' });
+
+    return res.status(200).json({ message: 'Card updated to active' });
+  } catch (error) {
+    console.error('Error checking card availability:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+const updateProfileEndDate = async (req, res) => {
+  const { profileId } = req.params;
+  const { newEndDate, newSubscriptionId, newProfileStartDate, gymId } =
+    req.body;
+
+  try {
+    // Check if the profile already exists
+    const profileRef = db.collection('profiles').doc(profileId);
+    const profileDoc = await profileRef.get();
+
+    if (!profileDoc.exists) {
+      return res.status(404).json({ error: 'Profile not found' });
+    }
+
+    // Check if the 'renewMembershipInQueue' object already exists in the profile
+    const profileData = profileDoc.data();
+    if (profileData.renewMembershipInQueue) {
+      return res
+        .status(400)
+        .json({ error: 'There is already a plan renewal in queue' });
+    }
+
+    // Create the 'renewMembershipInQueue' object
+    const renewMembershipInQueue = {
+      membershipId: newSubscriptionId,
+      newStartDate: newProfileStartDate,
+      newEndDate: newEndDate,
+    };
+
+    // Store 'renewMembershipInQueue' in the user's profile
+    await profileRef.set({ renewMembershipInQueue }, { merge: true });
+
+    const membershipsRef = db.collection('memberships');
+    const membershipSnapshot = await membershipsRef
+      .doc(newSubscriptionId.value) // Utilizar el membershipId del perfil
+      .get();
+
+    // Verificar si se encontró el membership y obtener el precio
+    let paymentAmount = 0;
+    if (membershipSnapshot.exists) {
+      const membershipData = membershipSnapshot.data();
+      paymentAmount = membershipData.price || 0; // Establecer el precio como paymentAmount
+    }
+    const paymentHistoryRef = db.collection('paymentHistory');
+    // Crear un documento en la colección paymentHistory con el paymentAmount
+    const paymentHistoryData = {
+      profileId: profileId,
+      membershipId: newSubscriptionId.value,
+      gymId: gymId,
+      paymentStartDate: newProfileStartDate.toISOString().slice(0, 10),
+      paymentEndDate: newEndDate.toISOString().slice(0, 10),
+      paymentType: 'renew',
+      paymentAmount: paymentAmount, // Establecer el paymentAmount obtenido del membership
+      // ... (otros datos relacionados con el pago o historial)
+    };
+
+    await paymentHistoryRef.doc().set(paymentHistoryData);
+
+    return res.status(200).json({
+      message: 'Profile updated, and object added to the queue successfully',
+    });
+  } catch (error) {
+    console.error('Error updating the profile:', error);
+    return res.status(500).json({ error: 'Error updating the profile' });
+  }
+};
+
+// Asociar la función de carga de archivos con una ruta existente
+
+// const updateProfile = async (req, res) => {
+//   try {
+//     const { profileCode, formData } = req.body;
+
+//     const profileRef = db.collection('profiles').doc(profileCode);
+
+//     // Actualiza el documento con los datos proporcionados en formData
+//     await profileRef.update(formData);
+
+//     res.json({ message: 'Profile record updated successfully', formData });
+//   } catch (error) {
+//     res.status(400).send(error.message);
+//   }
+// };
+
+// const updateProfile = async (req, res) => {
+//   try {
+//     const { profileId, fieldName, newValue } = req.body;
+//     const updateData = { [fieldName]: newValue };
+//     const getProfile = await db.collection('profiles').doc(profileId);
+//     await getProfile.update(updateData);
+//     res.send('Profile record updated successfuly');
+//   } catch (error) {
+//     res.status(400).send(error.message);
+//   }
+// };
+
+// {
+//   "fieldName": "profileStatus",
+//   "profileId":"EdjBhYQAEwBMKH9Dsg0v",
+// "newValue": false
+// }
+
+module.exports = {
+  getAllProfiles,
+  getProfile,
+  createProfile,
+  updateProfile,
+  uploadFile,
+  deleteFile,
+  freezeMembership,
+  unfreezeMembership,
+  checkCardAvailability,
+  checkCardForUpdated,
+  updateProfileEndDate,
+  getProfileByEmail,
+};
