@@ -157,6 +157,8 @@ const scanMember = async (req, res) => {
     const query = profilesRef.where('cardSerialNumber', '==', cardSerialNumber);
     const querySnapshot = await query.get();
 
+    console.log('entro aca', cardSerialNumber);
+
     if (querySnapshot.empty) {
       res.status(404).send('Perfil no encontrado');
       return;
@@ -164,6 +166,7 @@ const scanMember = async (req, res) => {
 
     const profileDoc = querySnapshot.docs[0];
     const profileData = profileDoc.data();
+    console.log(profileData);
     const currentDateTime = new Date();
     const accessHistoryRef = db.collection('accessHistory');
 
@@ -200,100 +203,45 @@ const scanMember = async (req, res) => {
         return;
       }
     } else {
-      // Membership hasn't expired; set the new values
-      profileData.profileEndDate = newEndDate;
-      profileData.membershipId = newSubscriptionId;
-      profileData.profileStartDate = newProfileStartDate;
-      await profileRef.set(profileData, { merge: true });
-    }
-
-    if (membershipSnapshot.empty) {
-      res.status(403).send('No matching membership found for the user.');
-      return;
-    }
-
-    const membershipDoc = membershipSnapshot.docs[0].data();
-
-    const selectedWeekDays = membershipDoc.selectedWeekDays;
-    const currentDay = currentDateTime
-      .toLocaleString('en-US', { weekday: 'short' })
-      .toUpperCase();
-
-    if (!selectedWeekDays.includes(currentDay)) {
-      res
-        .status(403)
-        .send('Today is not allowed according to your membership.');
-      return;
-    }
-
-    if (membershipDoc.isOffPeak) {
-      const currentTime = new Date(
-        getLocalTime(currentDateTime, gymDoc.data().gymTimeZone)
-      );
-      const formattedTime = currentTime.toISOString().substr(11, 5);
-      const startTimeOffPeak = membershipDoc.startTimeOffPeak;
-      const endTimeOffPeak = membershipDoc.endTimeOffPeak;
-
-      if (formattedTime < startTimeOffPeak || formattedTime > endTimeOffPeak) {
-        res
-          .status(403)
-          .send('The current time is not within the Off-Peak range.');
+      if (membershipSnapshot.empty) {
+        res.status(403).send('No matching membership found for the user.');
         return;
       }
-    }
 
-    if (!profileData.wasCheckIn) {
-      await Promise.all([
-        accessHistoryRef.add({
-          gymId: profileData.gymId,
-          profileId: profileDoc.id,
-          action: 'check-in',
-          timestamp: getLocalTime(
-            currentDateTime,
-            gymDoc.data().gymTimeZone
-          ).toISOString(),
-        }),
-        profileDoc.ref.set(
-          {
-            lastCheckIn: getLocalTime(
-              currentDateTime,
-              gymDoc.data().gymTimeZone
-            ).toISOString(),
-            wasCheckIn: true,
-          },
-          { merge: true }
-        ),
-      ]);
-    } else {
-      const lastCheckISOString = profileData.lastCheckIn;
-      const lastCheck = new Date(lastCheckISOString);
-      const timeDifference = currentDateTime - lastCheck;
-      const eightHoursInMilliseconds = 8 * 60 * 60 * 1000;
+      const membershipDoc = membershipSnapshot.docs[0].data();
 
-      if (timeDifference <= eightHoursInMilliseconds) {
-        await Promise.all([
-          accessHistoryRef.add({
-            gymId: profileData.gymId,
-            profileId: profileDoc.id,
-            action: 'check-out',
-            timestamp: getLocalTime(
-              currentDateTime,
-              gymDoc.data().gymTimeZone
-            ).toISOString(),
-          }),
-          profileDoc.ref.set(
-            {
-              lastCheckOut: getLocalTime(
-                currentDateTime,
-                gymDoc.data().gymTimeZone
-              ).toISOString(),
-              wasCheckIn: false,
-              notCheckOut: false,
-            },
-            { merge: true }
-          ),
-        ]);
-      } else {
+      const selectedWeekDays = membershipDoc.selectedWeekDays;
+      const currentDay = currentDateTime
+        .toLocaleString('en-US', { weekday: 'short' })
+        .toUpperCase();
+
+      if (!selectedWeekDays.includes(currentDay)) {
+        res
+          .status(403)
+          .send('Today is not allowed according to your membership.');
+        return;
+      }
+
+      if (membershipDoc.isOffPeak) {
+        const currentTime = new Date(
+          getLocalTime(currentDateTime, gymDoc.data().gymTimeZone)
+        );
+        const formattedTime = currentTime.toISOString().substr(11, 5);
+        const startTimeOffPeak = membershipDoc.startTimeOffPeak;
+        const endTimeOffPeak = membershipDoc.endTimeOffPeak;
+
+        if (
+          formattedTime < startTimeOffPeak ||
+          formattedTime > endTimeOffPeak
+        ) {
+          res
+            .status(403)
+            .send('The current time is not within the Off-Peak range.');
+          return;
+        }
+      }
+
+      if (!profileData.wasCheckIn) {
         await Promise.all([
           accessHistoryRef.add({
             gymId: profileData.gymId,
@@ -311,11 +259,63 @@ const scanMember = async (req, res) => {
                 gymDoc.data().gymTimeZone
               ).toISOString(),
               wasCheckIn: true,
-              notCheckOut: true,
             },
             { merge: true }
           ),
         ]);
+      } else {
+        const lastCheckISOString = profileData.lastCheckIn;
+        const lastCheck = new Date(lastCheckISOString);
+        const timeDifference = currentDateTime - lastCheck;
+        const eightHoursInMilliseconds = 8 * 60 * 60 * 1000;
+
+        if (timeDifference <= eightHoursInMilliseconds) {
+          await Promise.all([
+            accessHistoryRef.add({
+              gymId: profileData.gymId,
+              profileId: profileDoc.id,
+              action: 'check-out',
+              timestamp: getLocalTime(
+                currentDateTime,
+                gymDoc.data().gymTimeZone
+              ).toISOString(),
+            }),
+            profileDoc.ref.set(
+              {
+                lastCheckOut: getLocalTime(
+                  currentDateTime,
+                  gymDoc.data().gymTimeZone
+                ).toISOString(),
+                wasCheckIn: false,
+                notCheckOut: false,
+              },
+              { merge: true }
+            ),
+          ]);
+        } else {
+          await Promise.all([
+            accessHistoryRef.add({
+              gymId: profileData.gymId,
+              profileId: profileDoc.id,
+              action: 'check-in',
+              timestamp: getLocalTime(
+                currentDateTime,
+                gymDoc.data().gymTimeZone
+              ).toISOString(),
+            }),
+            profileDoc.ref.set(
+              {
+                lastCheckIn: getLocalTime(
+                  currentDateTime,
+                  gymDoc.data().gymTimeZone
+                ).toISOString(),
+                wasCheckIn: true,
+                notCheckOut: true,
+              },
+              { merge: true }
+            ),
+          ]);
+        }
       }
     }
 

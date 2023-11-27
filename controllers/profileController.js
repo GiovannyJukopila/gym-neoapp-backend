@@ -662,6 +662,7 @@ const updateProfileEndDate = async (req, res) => {
       membershipId: newSubscriptionId,
       newStartDate: newProfileStartDate,
       newEndDate: newEndDate,
+      renewDate: new Date().toISOString().slice(0, 10),
     };
 
     // Store 'renewMembershipInQueue' in the user's profile
@@ -684,9 +685,10 @@ const updateProfileEndDate = async (req, res) => {
       profileId: profileId,
       membershipId: newSubscriptionId.value,
       gymId: gymId,
-      paymentStartDate: newProfileStartDate.toISOString().slice(0, 10),
-      paymentEndDate: newEndDate.toISOString().slice(0, 10),
+      paymentStartDate: newProfileStartDate,
+      paymentEndDate: newEndDate,
       paymentType: 'renew',
+      renewDate: new Date().toISOString().slice(0, 10),
       paymentAmount: paymentAmount, // Establecer el paymentAmount obtenido del membership
       // ... (otros datos relacionados con el pago o historial)
     };

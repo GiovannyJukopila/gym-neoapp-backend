@@ -116,7 +116,176 @@ const getCurrentMembersByMemberships = async (req, res) => {
   }
 };
 
+const getCheckInReport = async (req, res) => {
+  const { gymId } = req.params;
+  const checkInRef = db.collection('accessHistory');
+
+  try {
+    const snapshot = await checkInRef
+      .where('gymId', '==', gymId)
+      .where('action', '==', 'check-in')
+      .get();
+
+    const now = new Date(); // Fecha actual
+    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000); // Fecha hace 7 días
+
+    let totalCheckInsLastSevenDays = 0;
+    let totalCheckInsToday = 0;
+
+    snapshot.forEach((doc) => {
+      const timestamp = new Date(doc.data().timestamp);
+
+      if (timestamp >= sevenDaysAgo) {
+        totalCheckInsLastSevenDays++;
+      }
+
+      if (
+        timestamp.toISOString().split('T')[0] ===
+        now.toISOString().split('T')[0]
+      ) {
+        totalCheckInsToday++;
+      }
+    });
+
+    // Enviar los datos recopilados al frontend
+    const responseData = {
+      totalCheckInsLastSevenDays,
+      totalCheckInsToday,
+    };
+
+    res.status(200).json(responseData);
+  } catch (error) {
+    // Manejo de errores
+    console.error('Error al obtener los datos:', error);
+    res
+      .status(500)
+      .json({ error: 'Ocurrió un error al procesar la solicitud.' });
+  }
+};
+
+const getPaymentReport = async (req, res) => {
+  const { gymId } = req.params;
+  const paymentRef = db.collection('paymentHistory');
+
+  try {
+    const snapshot = await paymentRef.where('gymId', '==', gymId).get();
+
+    const now = new Date(); // Fecha actual
+    const todayStart = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate()
+    ); // Inicio del día actual
+    const todayEnd = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate() + 1
+    ); // Fin del día actual
+
+    let totalPaymentsLastSevenDays = 0;
+    let totalPaymentsToday = 0;
+
+    snapshot.forEach((doc) => {
+      const paymentType = doc.data().paymentType;
+      let paymentDate;
+
+      if (paymentType === 'new') {
+        paymentDate = new Date(doc.data().paymentStartDate).getTime();
+      } else if (paymentType === 'renew') {
+        paymentDate = new Date(doc.data().renewDate).getTime();
+      } else {
+        return; // Si el tipo de pago no es 'new' o 'renew', pasamos al siguiente documento
+      }
+
+      if (
+        paymentDate >= now.getTime() - 7 * 24 * 60 * 60 * 1000 &&
+        paymentDate <= now.getTime()
+      ) {
+        totalPaymentsLastSevenDays += parseFloat(doc.data().paymentAmount);
+      }
+
+      if (
+        paymentDate >= todayStart.getTime() &&
+        paymentDate < todayEnd.getTime()
+      ) {
+        totalPaymentsToday += parseFloat(doc.data().paymentAmount);
+      }
+    });
+
+    // Enviar los datos recopilados al frontend
+    const responseData = {
+      totalPaymentsLastSevenDays,
+      totalPaymentsToday,
+    };
+
+    res.status(200).json(responseData);
+  } catch (error) {
+    // Manejo de errores
+    console.error('Error al obtener los datos:', error);
+    res
+      .status(500)
+      .json({ error: 'Ocurrió un error al procesar la solicitud.' });
+  }
+};
+
+const getGuestReport = async (req, res) => {
+  const { gymId } = req.params;
+  const guestsRef = db.collection('guests');
+
+  try {
+    const snapshot = await guestsRef.where('gymId', '==', gymId).get();
+
+    const now = new Date(); // Fecha actual
+    const todayStart = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate()
+    ); // Inicio del día actual
+    const todayEnd = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate() + 1
+    ); // Fin del día actual
+    const sevenDaysAgo = now.getTime() - 7 * 24 * 60 * 60 * 1000; // Hace 7 días en milisegundos
+
+    let totalGuestsLastSevenDays = 0;
+    let totalGuestsToday = 0;
+
+    snapshot.forEach((doc) => {
+      const currentDate = new Date(doc.data().currentDate).getTime();
+
+      if (currentDate >= sevenDaysAgo && currentDate <= now.getTime()) {
+        totalGuestsLastSevenDays++;
+      }
+
+      if (
+        currentDate >= todayStart.getTime() &&
+        currentDate < todayEnd.getTime()
+      ) {
+        totalGuestsToday++;
+      }
+    });
+
+    // Enviar los datos recopilados al frontend
+    const responseData = {
+      totalGuestsLastSevenDays,
+      totalGuestsToday,
+    };
+
+    res.status(200).json(responseData);
+  } catch (error) {
+    // Manejo de errores
+    console.error('Error al obtener los datos de invitados:', error);
+    res
+      .status(500)
+      .json({ error: 'Ocurrió un error al procesar la solicitud.' });
+  }
+};
+
 module.exports = {
   getTotalMembers,
   getCurrentMembersByMemberships,
+  getCheckInReport,
+  getPaymentReport,
+  getGuestReport,
 };
