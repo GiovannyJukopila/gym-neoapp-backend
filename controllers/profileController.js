@@ -724,7 +724,7 @@ const updateProfileEndDate = async (req, res) => {
 
     // Check if the 'renewMembershipInQueue' object already exists in the profile
     const profileData = profileDoc.data();
-    if (profileData?.renewMembershipInQueue?.renewIsInQueue) {
+    if (profileData.renewMembershipInQueue.renewIsInQueue) {
       return res
         .status(400)
         .json({ error: 'There is already a plan renewal in queue' });
