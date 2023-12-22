@@ -82,8 +82,8 @@ const createProfile = async (req, res) => {
             ? req.body.profileDiscountValue
             : '',
         profileTotalReceive: req.body.profileTotalReceive,
-        profileCoupleName: req.body?.profileCoupleName,
-        profileCoupleEmail: req.body?.profileCoupleEmail,
+        profileCoupleName: req.body.profileCoupleName,
+        profileCoupleEmail: req.body.profileCoupleEmail,
       };
 
       // Crea el nuevo perfil
