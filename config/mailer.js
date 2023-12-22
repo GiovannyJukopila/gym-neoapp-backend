@@ -70,8 +70,6 @@ async function sendCustomEmail(recipient, subject) {
       subject: subject,
       html: buildCustomEmailContent(),
     });
-
-    console.log('Message sent to ' + recipient + ': %s', info.messageId);
   } catch (error) {
     console.error('Error sending email to ' + recipient + ':', error);
   }

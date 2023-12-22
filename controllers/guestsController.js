@@ -11,7 +11,22 @@ const admin = require('firebase-admin');
 const createGuest = async (req, res) => {
   try {
     const guestsRef = db.collection('guests');
+    const gymId = req.body.gymId;
+    const gymSnapshot = await admin
+      .firestore()
+      .collection('gyms')
+      .doc(gymId)
+      .get();
+    const gymData = gymSnapshot.data();
+    const gymTimeZone = gymData.gymTimeZone;
+    const utcOffset = getUtcOffset(gymTimeZone);
 
+    const utcDate = new Date();
+    const localTimeInMilliseconds = utcDate.getTime() - utcOffset * 60 * 1000;
+
+    const currentDate = new Date(localTimeInMilliseconds);
+    currentDate.setUTCHours(0, 0, 0, 0);
+    const dateString = currentDate.toISOString().split('T')[0];
     // Resto de los campos del guest
     const guestData = {
       gymId: req.body.gymId,
@@ -19,7 +34,7 @@ const createGuest = async (req, res) => {
       name: req.body.name,
       lastname: req.body.lastname,
       numberOfPeople: req.body.numberOfPeople,
-      currentDate: req.body.currentDate,
+      currentDate: dateString,
     };
 
     // Crea el nuevo guest
@@ -35,6 +50,11 @@ const createGuest = async (req, res) => {
     console.error('Error al crear el invitado:', error);
     res.status(500).json({ error: 'Error al crear el invitado' });
   }
+};
+const getUtcOffset = (timeZoneStr) => {
+  const sign = timeZoneStr.includes('-') ? -1 : 1;
+  const offsetStr = timeZoneStr.split(/[\+\-]/)[1];
+  return parseInt(offsetStr, 10) * sign;
 };
 
 const getAllGuests = async (req, res) => {
@@ -64,7 +84,7 @@ const getAllGuests = async (req, res) => {
       const guestData = {
         guestId: doc.id,
         ...doc.data(),
-        currentDate: formatDate(doc.data().currentDate), // Aplicar formatDate a currentDate
+        // Aplicar formatDate a currentDate
       };
       guestsData.push(guestData);
     });
@@ -76,6 +96,20 @@ const getAllGuests = async (req, res) => {
     res.status(500).json({ error: 'Error al obtener los invitados' });
   }
 };
+
+function formatDateFromTimestamp(timestamp) {
+  const currentDate = new Date(timestamp.seconds * 1000); // Convertir el timestamp de Firebase a milisegundos
+
+  const year = currentDate.getFullYear(); // Obtener el año (ej: 2023)
+  let month = currentDate.getMonth() + 1; // Obtener el mes (0-11)
+  month = month < 10 ? `0${month}` : month; // Ajustar el formato a 'MM'
+  let day = currentDate.getDate(); // Obtener el día del mes
+  day = day < 10 ? `0${day}` : day; // Ajustar el formato a 'DD'
+
+  const formattedDate = `${year}-${month}-${day}`; // Crear la fecha en el formato deseado (YYYY-MM-DD)
+  return formattedDate;
+}
+
 function formatDate(date) {
   if (date instanceof Date) {
     const year = date.getFullYear();

@@ -42,9 +42,7 @@ cardsRef
 
     workbook.xlsx
       .writeFile(outputPath)
-      .then(() => {
-        console.log('Archivo Excel generado y guardado:', outputPath);
-      })
+      .then(() => {})
       .catch((error) => {
         console.error('Error al guardar el archivo Excel:', error);
       });

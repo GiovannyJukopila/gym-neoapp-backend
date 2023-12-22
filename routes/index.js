@@ -12,19 +12,18 @@ const guestsRouter = require('./guests.router');
 const dashboard = require('./dashboard.router');
 const reports = require('./reports.router');
 
-function routerApi(app) {
-  const router = express.Router();
-  app.use('/api/v1', router);
-  router.use('/gyms', gymsRouter);
-  router.use('/scan', scanRouter);
-  router.use('/memberships', membershipRouter);
-  router.use('/profiles', profileRouter); // To ways to use but this is easier to mantein
-  router.use('/auth', authRouter);
-  router.use('/classes', classesRouter);
-  router.use('/notification', notificationRouter);
-  router.use('/trainers', trainersRouter);
-  router.use('/guests', guestsRouter);
-  router.use('/dashboard', dashboard);
-  router.use('/reports', reports);
-}
-module.exports = routerApi;
+const router = express.Router();
+//app.use('/api/v1', router);
+router.use('/gyms', gymsRouter);
+router.use('/scan', scanRouter);
+router.use('/memberships', membershipRouter);
+router.use('/profiles', profileRouter); // To ways to use but this is easier to mantein
+router.use('/auth', authRouter);
+router.use('/classes', classesRouter);
+router.use('/notification', notificationRouter);
+router.use('/trainers', trainersRouter);
+router.use('/guests', guestsRouter);
+router.use('/dashboard', dashboard);
+router.use('/reports', reports);
+
+module.exports = router;

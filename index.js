@@ -1,9 +1,8 @@
 const express = require('express');
-// const cors = require('cors');
 const routerApi = require('./routes');
 const app = express();
-const port = process.env.PORT || 80;
-//const port = process.env.PORT || 3000;
+const port = process.env.PORT || 3000;
+//const port = process.env.PORT || 2083;
 const cors = require('cors');
 require('dotenv').config();
 
@@ -16,8 +15,10 @@ app.use(express.json());
 // app.use(cors());
 // app.use(bodyParser.json());
 
-routerApi(app);
+app.use('/api/', routerApi);
+
+//routerApi(app);
 
 app.listen(port, () => {
-  console.log('Mi port' + port);
+  console.log('NeoApp Server is ON');
 });

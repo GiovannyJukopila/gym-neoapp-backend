@@ -49,7 +49,6 @@ const cantidadTarjetas = 1;
 
 generarTarjetas(cantidadTarjetas)
   .then(() => {
-    console.log('Proceso completado.');
     process.exit(0);
   })
   .catch((error) => {

@@ -18,7 +18,6 @@ const getGym = async (req, res) => {
 
 const updateAdminSettings = async (req, res) => {
   try {
-    console.log(req.params.gymId);
     const gymId = req.params.gymId;
     const modifiedAuthorizations = req.body;
     const gymRef = db.collection('gyms').doc(gymId);

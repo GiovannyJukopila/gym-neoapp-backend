@@ -27,7 +27,7 @@ function buildCustomEmailContent(subject, content, image, reason) {
     : '';
   const button =
     reason === 'setup_password'
-      ? `<a href="http://localhost:4200/setup-password" class="button">Set Up Password</a>`
+      ? `<a href="https://admin.gym-neoapp.com/" class="button">Set Up Password</a>`
       : '';
 
   return `
@@ -139,13 +139,11 @@ async function getMemberEmailsByGymId(gymId) {
 async function sendCustomEmail(recipient, subject, emailContent, image) {
   try {
     const info = await transporter.sendMail({
-      from: '"No Reply - Neo App 👻" <goneoapp@gmail.com>',
+      from: '"No Reply - NeoApp 👻" <goneoapp@gmail.com>',
       to: recipient,
       subject: subject,
       html: emailContent, // Usar el contenido HTML generado
     });
-
-    console.log('Message sent to ' + recipient + ': %s', info.messageId);
   } catch (error) {
     console.error('Error sending email to ' + recipient + ':', error);
   }
@@ -157,7 +155,6 @@ const getNotification = async (req, res) => {
     const { subject, content, image, recipient, reason, isForAll, gymId } =
       req.body;
 
-    console.log(req.body);
     // Nombre del archivo adjunto
     const imageFileName = 'image.png';
 
@@ -174,13 +171,18 @@ const getNotification = async (req, res) => {
           await sendCustomEmail(email, subject, emailContent);
         }
       } else {
-        const emailContent = buildCustomEmailContent(
-          subject,
-          content,
-          image,
-          reason
-        );
-        await sendCustomEmail(recipient, subject, emailContent);
+        const recipientEmails = recipient
+          .split(',')
+          .map((email) => email.trim());
+        for (const email of recipientEmails) {
+          const emailContent = buildCustomEmailContent(
+            subject,
+            content,
+            image,
+            reason
+          );
+          await sendCustomEmail(email, subject, emailContent);
+        }
       }
     } else if (reason === 'others' || reason === 'promo') {
       if (isForAll) {
@@ -190,8 +192,18 @@ const getNotification = async (req, res) => {
           await sendCustomEmail(email, subject, emailContent);
         }
       } else {
-        const emailContent = buildCustomEmailContent(subject, content, image);
-        await sendCustomEmail(recipient, subject, emailContent);
+        const recipientEmails = recipient
+          .split(',')
+          .map((email) => email.trim());
+        for (const email of recipientEmails) {
+          const emailContent = buildCustomEmailContent(
+            subject,
+            content,
+            image,
+            reason
+          );
+          await sendCustomEmail(email, subject, emailContent);
+        }
       }
     }
 

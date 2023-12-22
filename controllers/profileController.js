@@ -7,7 +7,7 @@ const { getStorage, ref, uploadBytesResumable } = require('@firebase/storage');
 const admin = require('firebase-admin');
 const Profile = require('../models/profile');
 const bodyParser = require('body-parser');
-const sharp = require('sharp');
+
 app.use(bodyParser.json());
 
 const jwt = require('jsonwebtoken');
@@ -65,6 +65,25 @@ const createProfile = async (req, res) => {
         wasCheckIn: req.body.wasCheckIn,
         role: 'member',
         profileGender: req.body.profileGender,
+        profileLastMembershipPrice: req.body.profileLastMembershipPrice,
+        profileWasDiscount: req.body.profileWasDiscount,
+        profileWasComplementary: req.body.profileWasComplementary,
+        profileComplementaryReason:
+          req.body.profileComplementaryReason !== undefined
+            ? req.body.profileComplementaryReason
+            : '',
+        profileDiscountType: req.body.profileDiscountType,
+        profileDiscountPercentage:
+          req.body.profileDiscountPercentage !== undefined
+            ? req.body.profileDiscountPercentage
+            : '',
+        profileDiscountValue:
+          req.body.profileDiscountValue !== undefined
+            ? req.body.profileDiscountValue
+            : '',
+        profileTotalReceive: req.body.profileTotalReceive,
+        profileCoupleName: req?.body?.profileCoupleName,
+        profileCoupleEmail: req?.body?.profileCoupleEmail,
       };
 
       // Crea el nuevo perfil
@@ -76,22 +95,26 @@ const createProfile = async (req, res) => {
         .get();
 
       // Verificar si se encontró el membership y obtener el precio
-      let paymentAmount = 0;
-      if (membershipSnapshot.exists) {
-        const membershipData = membershipSnapshot.data();
-        paymentAmount = membershipData.price || 0; // Establecer el precio como paymentAmount
-      }
+      const currentDate = new Date();
 
+      // Obtener el año, mes y día de la fecha actual
+      const year = currentDate.getFullYear();
+      const month = String(currentDate.getMonth() + 1).padStart(2, '0'); // Agregar ceros iniciales si es necesario
+      const day = String(currentDate.getDate()).padStart(2, '0'); // Agregar ceros iniciales si es necesario
+
+      // Crear el string de la fecha en el formato 'YYYY-MM-DD'
+      const formattedDate = `${year}-${month}-${day}`;
       const paymentHistoryRef = db.collection('paymentHistory');
       // Crear un documento en la colección paymentHistory con el paymentAmount
       const paymentHistoryData = {
         profileId: newProfileId,
         membershipId: req.body.membershipId,
         gymId: req.body.gymId,
+        paymentDate: new Date().toISOString().slice(0, 10),
         paymentStartDate: req.body.profileStartDate,
         paymentEndDate: req.body.profileEndDate,
         paymentType: 'new',
-        paymentAmount: paymentAmount, // Establecer el paymentAmount obtenido del membership
+        paymentAmount: req.body.profileTotalReceive, // Establecer el paymentAmount obtenido del membership
         // ... (otros datos relacionados con el pago o historial)
       };
 
@@ -162,7 +185,20 @@ const getAllProfiles = async (req, res) => {
         doc.data().notCheckOut,
         doc.data().wasCheckIn,
         doc.data().role,
-        doc.data().profileGender
+        doc.data().profileGender,
+        doc.data().profileLastMembershipPrice,
+        doc.data().profileWasDiscount,
+        doc.data().profileWasComplementary,
+        doc.data().profileComplementaryReason,
+        doc.data().profileDiscountType,
+        doc.data().profileDiscountPercentage,
+        doc.data().profileDiscountValue,
+        doc.data().profileTotalReceive,
+        doc.data().renewMembershipInQueue,
+        doc.data().renewIsInQueue,
+        doc.data().profileCoupleName,
+        doc.data().profileCoupleEmail,
+        doc.data().profileIsACouple
         // doc.data().profileFile,
       );
 
@@ -329,16 +365,6 @@ const getProfileByEmail = async (req, res) => {
 const updateProfile = async (req, res) => {
   try {
     const { profileCode, formData } = req.body;
-    // console.log(formData);
-
-    // Check if a file is attached in the formData
-    // if (formData.profileFile) {
-    //   const fileUrl = await uploadFileToStorage(
-    //     formData.profileFile.buffer,
-    //     formData.profileFile.name
-    //   );
-    //   formData.profileFile = fileUrl;
-    // }
 
     const profileRef = admin
       .firestore()
@@ -394,7 +420,6 @@ const uploadFile = async (req, res) => {
   try {
     const { profileCode, profileFileName } = req.body;
     const file = req.file; // Aquí asumimos que el archivo se encuentra en el campo 'file' de la solicitud
-    console.log(req.body);
     // Verifica si se adjuntó un archivo en la solicitud
     if (!file) {
       return res
@@ -502,23 +527,44 @@ const deleteFile = async (req, res) => {
 
 const freezeMembership = async (req, res) => {
   try {
-    const {
-      profileId,
-      profileFrozen,
-      profileFrozenStartDate,
-      profileFrozenDays,
-    } = req.body;
+    const { profileId, profileFrozen, profileFrozenStartDate, gymId } =
+      req.body;
 
     // Verifica que el perfil exista y realice las validaciones necesarias
 
+    const profileSnapshot = await db
+      .collection('profiles')
+      .doc(profileId)
+      .get();
+
+    // Obtiene el membershipId del documento del perfil
+    const { membershipId } = profileSnapshot.data();
+
     // Actualiza los campos en el perfil seleccionado
-    await db.collection('profiles').doc(profileId).update({
-      profileFrozen: profileFrozen,
-      profileFrozenStartDate: profileFrozenStartDate,
-      profileFrozenDays: profileFrozenDays,
-      profileStatus: false,
-      profileUnFrozen: false,
-    });
+    await db
+      .collection('profiles')
+      .doc(profileId)
+      .update({
+        profileFrozen: profileFrozen,
+        profileFrozenStartDate: new Date().toISOString().slice(0, 10),
+        profileStatus: false,
+        profileUnFrozen: false,
+      });
+
+    const paymentHistoryRef = db.collection('paymentHistory');
+    // Crear un documento en la colección paymentHistory con el paymentAmount
+    const paymentHistoryData = {
+      profileId: profileId,
+      gymId: gymId,
+      paymentDate: new Date().toISOString().slice(0, 10),
+      paymentType: 'Freeze',
+      paymentAmount: 0,
+      membershipId: membershipId,
+      // Establecer el paymentAmount obtenido del membership
+      // ... (otros datos relacionados con el pago o historial)
+    };
+
+    await paymentHistoryRef.doc().set(paymentHistoryData);
 
     // Responde con éxito
     res.status(200).json({ message: 'Membership frozen successfully' });
@@ -530,22 +576,51 @@ const freezeMembership = async (req, res) => {
 
 const unfreezeMembership = async (req, res) => {
   try {
-    const { profileId, profileUnFreezeStartDate, profileUnFreezeEndDate } =
-      req.body;
-    const formattedUnfreezeEndDate = new Date(profileUnFreezeEndDate)
-      .toISOString()
-      .split('T')[0];
+    const {
+      gymId,
+      profileId,
+      profileUnFreezeDate,
+      profileUnfreezeStartDate,
+      profileUnFreezeFee,
+      profileUnFreezeDays,
+      profileFrozenReason,
+    } = req.body;
+
+    const profileSnapshot = await db
+      .collection('profiles')
+      .doc(profileId)
+      .get();
+    // Obtiene el membershipId del documento del perfil
+    const { membershipId } = profileSnapshot.data();
 
     // Actualiza los campos en el perfil seleccionado para descongelar la membresía y establece las fechas de descongelación
     await db.collection('profiles').doc(profileId).update({
       profileFrozen: false, // Establece profileFrozen en false para descongelar
-      //profileFrozenStartDate: '', // Establece profileFrozenStartDate en null
-      profileFrozenDays: 0, // Establece profileFrozenDays en null
-      profileUnFreezeStartDate: profileUnFreezeStartDate, // Almacena profileUnFreezeStartDate
-      profileEndDate: formattedUnfreezeEndDate, // Almacena profileUnFreezeEndDate
+      profileUnFreezeDate: profileUnFreezeDate, // Almacena profileUnFreezeStartDate
+      profileUnFreezeFee: profileUnFreezeFee, // Almacena profileUnFreezeEndDate
+      profileUnfreezeStartDate: profileUnfreezeStartDate,
+      profileUnFreezeDays: profileUnFreezeDays,
+      profileFrozenReason: profileFrozenReason,
       profileStatus: true,
       profileUnFrozen: true,
     });
+
+    const paymentHistoryRef = db.collection('paymentHistory');
+    // Crear un documento en la colección paymentHistory con el paymentAmount
+    const paymentHistoryData = {
+      profileId: profileId,
+      gymId: gymId,
+      paymentStartDate: profileUnfreezeStartDate,
+      paymentDate: new Date().toISOString().slice(0, 10),
+      paymentType: 'UnFreeze',
+      paymentUnFreezeDays: profileUnFreezeDays,
+      paymentFrozenReason: profileFrozenReason,
+      paymentAmount: profileUnFreezeFee,
+      membershipId: membershipId, // Establecer el paymentAmount obtenido del membership
+      // ... (otros datos relacionados con el pago o historial)
+    };
+
+    await paymentHistoryRef.doc().set(paymentHistoryData);
 
     // Responde con éxito
     res.status(200).json({ message: 'Membership unfrozen successfully' });
@@ -557,7 +632,6 @@ const unfreezeMembership = async (req, res) => {
 
 const checkCardAvailability = async (req, res) => {
   const cardSerialNumber = req.body.cardSerialNumber;
-
   try {
     const cardRef = db.collection('cards').doc(cardSerialNumber);
     const cardDoc = await cardRef.get();
@@ -637,8 +711,7 @@ const checkCardForUpdated = async (req, res) => {
 
 const updateProfileEndDate = async (req, res) => {
   const { profileId } = req.params;
-  const { newEndDate, newSubscriptionId, newProfileStartDate, gymId } =
-    req.body;
+  const { profilReneweData, gymId } = req.body;
 
   try {
     // Check if the profile already exists
@@ -651,7 +724,7 @@ const updateProfileEndDate = async (req, res) => {
 
     // Check if the 'renewMembershipInQueue' object already exists in the profile
     const profileData = profileDoc.data();
-    if (profileData.renewMembershipInQueue) {
+    if (profileData?.renewMembershipInQueue?.renewIsInQueue) {
       return res
         .status(400)
         .json({ error: 'There is already a plan renewal in queue' });
@@ -659,37 +732,54 @@ const updateProfileEndDate = async (req, res) => {
 
     // Create the 'renewMembershipInQueue' object
     const renewMembershipInQueue = {
-      membershipId: newSubscriptionId,
-      newStartDate: newProfileStartDate,
-      newEndDate: newEndDate,
+      renewIsInQueue: true,
+      membership: profilReneweData.currentSubscription,
+      profileRenewStartDate: profilReneweData.profileRenewStartDate,
+      profileRenewEndDate: profilReneweData.profileRenewEndDate,
       renewDate: new Date().toISOString().slice(0, 10),
+
+      profileRenewLastMembershipPrice:
+        profilReneweData.currentSubscription.price,
+      profileRenewWasDiscount: profilReneweData.discountActivated,
+      profileRenewWasComplementary: profilReneweData.complementaryActivated,
+      profileRenewComplementaryReason: profilReneweData.complementaryReason,
+      profileRenewDiscountType: profilReneweData.discountType,
+      profileRenewDiscountPercentage: profilReneweData.discountPercentage,
+      profileRenewDiscountValue: profilReneweData.discountValue,
+      profileRenewTotalReceive: profilReneweData.totalReceive,
+      profileRenewCoupleName: profilReneweData.profileRenewCoupleName,
+      profileRenewCoupleEmail: profilReneweData.profileRenewCoupleEmail,
+      profileRenewIsCouple: profilReneweData.profileRenewIsCouple,
     };
 
     // Store 'renewMembershipInQueue' in the user's profile
     await profileRef.set({ renewMembershipInQueue }, { merge: true });
 
-    const membershipsRef = db.collection('memberships');
-    const membershipSnapshot = await membershipsRef
-      .doc(newSubscriptionId.value) // Utilizar el membershipId del perfil
-      .get();
-
+    // const renewUpdatedInProfileCollection = {
+    //   profileLastMembershipPrice: profilReneweData.currentSubscription.price,
+    //   profileWasDiscount: profilReneweData.discountActivated,
+    //   profileWasComplementary: profilReneweData.complementaryActivated,
+    //   profileComplementaryReason: profilReneweData.complementaryReason,
+    //   profileDiscountType: profilReneweData.discountType,
+    //   profileDiscountPercentage: profilReneweData.discountPercentage,
+    //   profileDiscountValue: profilReneweData.discountValue,
+    //   profileTotalReceive: profilReneweData.totalReceive,
+    // };
     // Verificar si se encontró el membership y obtener el precio
-    let paymentAmount = 0;
-    if (membershipSnapshot.exists) {
-      const membershipData = membershipSnapshot.data();
-      paymentAmount = membershipData.price || 0; // Establecer el precio como paymentAmount
-    }
+    // await profileRef.update(renewUpdatedInProfileCollection);
+
     const paymentHistoryRef = db.collection('paymentHistory');
     // Crear un documento en la colección paymentHistory con el paymentAmount
     const paymentHistoryData = {
       profileId: profileId,
-      membershipId: newSubscriptionId.value,
+      membershipId: profilReneweData.currentSubscription.value,
       gymId: gymId,
-      paymentStartDate: newProfileStartDate,
-      paymentEndDate: newEndDate,
+      paymentStartDate: profilReneweData.profileRenewStartDate,
+      paymentEndDate: profilReneweData.profileRenewEndDate,
       paymentType: 'renew',
+      paymentDate: new Date().toISOString().slice(0, 10),
       renewDate: new Date().toISOString().slice(0, 10),
-      paymentAmount: paymentAmount, // Establecer el paymentAmount obtenido del membership
+      paymentAmount: profilReneweData.totalReceive, // Establecer el paymentAmount obtenido del membership
       // ... (otros datos relacionados con el pago o historial)
     };
 
@@ -701,6 +791,36 @@ const updateProfileEndDate = async (req, res) => {
   } catch (error) {
     console.error('Error updating the profile:', error);
     return res.status(500).json({ error: 'Error updating the profile' });
+  }
+};
+
+const searchProfile = async (req, res) => {
+  try {
+    const term = req.query.term.toLowerCase();
+    const gymId = req.query.gymId;
+
+    const profilesRef = db.collection('profiles');
+    const snapshot = await profilesRef
+      .where('gymId', '==', gymId)
+      .where('role', '==', 'member')
+      .get();
+
+    const profiles = [];
+    snapshot.forEach((doc) => {
+      const profile = doc.data();
+      // Aplicar filtro por term en profileName y profileLastname
+      if (
+        profile.profileName.toLowerCase().includes(term) ||
+        profile.profileLastname.toLowerCase().includes(term)
+      ) {
+        profiles.push(profile);
+      }
+    });
+
+    res.json(profiles);
+  } catch (error) {
+    console.error('Error fetching profiles:', error);
+    res.status(500).send('Error fetching profiles');
   }
 };
 
@@ -742,6 +862,7 @@ const updateProfileEndDate = async (req, res) => {
 module.exports = {
   getAllProfiles,
   getProfile,
+  searchProfile,
   createProfile,
   updateProfile,
   uploadFile,

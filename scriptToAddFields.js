@@ -20,11 +20,8 @@ async function actualizarUsuariosConGymId() {
       const usuarioData = usuarioDoc.data();
       if (!usuarioData.hasOwnProperty('gymId')) {
         await usuarioDoc.ref.update({ gymId: gimnasioRef });
-        console.log(`Se agregó gymId a ${usuarioDoc.id}`);
       }
     });
-
-    console.log('Usuarios actualizados exitosamente con gymId.');
   } catch (error) {
     console.error('Error al actualizar usuarios:', error);
   }

@@ -51,7 +51,6 @@ const cantidadTarjetas = 0;
 
 generarTarjetas(gymId, cantidadTarjetas)
   .then(() => {
-    console.log('Proceso completado.');
     process.exit(0);
   })
   .catch((error) => {

@@ -120,13 +120,30 @@ const getlogIn = async (req, res) => {
       const profileDoc = profileSnapshot.docs[0];
       profileData = profileDoc.data();
 
+      const gymId = profileData.gymId;
+      const gymRef = db.collection('gyms').doc(gymId);
+      const gymSnapShot = await gymRef.get();
+      const gymData = gymSnapShot.data();
+      const gymEndDate = gymData.gymEndDate;
+
+      const currentDate = new Date();
+      const endDate = new Date(gymEndDate);
+
+      if (endDate < currentDate) {
+        return res.status(404).json({
+          changepassword: false,
+          error: 'The membership period has expired.',
+        });
+        // Realizar acciones adicionales aquí si el período ha expirado
+      }
+
       const hashedPassword = hashPassword(password, profileData.salt);
 
       // Compara el hash calculado con el hash almacenado en el perfil
       if (hashedPassword !== profileData.profilePassword) {
         return res
           .status(401)
-          .json({ changepassword: false, error: 'Credenciales incorrectas' });
+          .json({ changepassword: false, error: 'Incorrect credentials' });
       }
 
       const secretKey = process.env.ACCESS_TOKEN_SECRET;
@@ -144,10 +161,6 @@ const getlogIn = async (req, res) => {
         const daysDifference = Math.floor(
           (currentDate - passwordCreationDate) / (1000 * 60 * 60 * 24)
         );
-
-        console.log('currentDate:', currentDate);
-        console.log('passwordCreationDate:', passwordCreationDate);
-        console.log('dayDifference:', daysDifference);
 
         // If less than 1 minute has passed and it's an administrator, show an error
         if (daysDifference > 30) {
@@ -192,7 +205,6 @@ const getlogIn = async (req, res) => {
           profileIsTrainer: profileData.role,
           // ...
         };
-        console.log('profile is trainer: ', responseData.profileIsTrainer);
         return res.status(200).json(responseData);
       }
     } else {
@@ -212,6 +224,23 @@ const getlogIn = async (req, res) => {
       const profileDoc = profileSnapshot.docs[0];
       profileData = profileDoc.data();
 
+      const gymId = profileData.gymId;
+      const gymRef = db.collection('gyms').doc(gymId);
+      const gymSnapShot = await gymRef.get();
+      const gymData = gymSnapShot.data();
+      const gymEndDate = gymData.gymEndDate;
+
+      const currentDate = new Date();
+      const endDate = new Date(gymEndDate);
+
+      if (endDate < currentDate) {
+        return res.status(404).json({
+          changepassword: false,
+          error: 'The membership period has expired.',
+        });
+        // Realizar acciones adicionales aquí si el período ha expirado
+      }
+
       const hashedPassword = hashPassword(password, profileData.salt);
 
       // Compara el hash calculado con el hash almacenado en el perfil
@@ -236,10 +265,6 @@ const getlogIn = async (req, res) => {
         const daysDifference = Math.floor(
           (currentDate - passwordCreationDate) / (1000 * 60 * 60 * 24)
         );
-
-        console.log('currentDate:', currentDate);
-        console.log('passwordCreationDate:', passwordCreationDate);
-        console.log('dayDifference:', daysDifference);
 
         // If less than 1 minute has passed and it's an administrator, show an error
         if (daysDifference > 30) {
@@ -284,7 +309,6 @@ const getlogIn = async (req, res) => {
           profileIsTrainer: profileData.role,
           // ...
         };
-        console.log('profile is trainer: ', responseData.profileIsTrainer);
         return res.status(200).json(responseData);
       }
     }
@@ -295,141 +319,6 @@ const getlogIn = async (req, res) => {
     return res.status(500).json({ error: 'Error interno del servidor' });
   }
 };
-
-// const getlogIn = async (req, res) => {
-//   const { identifier, password } = req.body;
-
-//   try {
-//     let profileData;
-
-//     // Verifica si el identificador es un email
-//     const isEmail = /\S+@\S+\.\S+/.test(identifier);
-
-//     if (isEmail) {
-//       // Intenta buscar el perfil por el correo electrónico
-//       const profileRef = db
-//         .collection('profiles')
-//         .where('profileEmail', '==', identifier);
-//       const profileSnapshot = await profileRef.get();
-
-//       if (profileSnapshot.empty) {
-//         return res.status(401).json({ error: 'Credenciales incorrectas' });
-//       }
-
-//       // Obtén el primer perfil que coincida
-//       const profileDoc = profileSnapshot.docs[0];
-//       profileData = profileDoc.data();
-
-//       if (profileData.profileIsAdmin) {
-//         const currentDate = new Date();
-//         const passwordCreationDate = new Date(profileData.passwordCreationDate);
-//         const daysDifference = Math.floor(
-//           (currentDate - passwordCreationDate) / (1000 * 60 * 60 * 24)
-//         );
-
-//         console.log('currentDate:', currentDate);
-//         console.log('passwordCreationDate:', passwordCreationDate);
-//         console.log('dayDifference:', daysDifference);
-
-//         // If less than 1 minute has passed and it's an administrator, show an error
-//         if (daysDifference > 30) {
-//           return res.status(401).json({
-//             changepassword: true,
-//             error: 'You must change your password before logging in.',
-//           });
-//         }
-//       }
-//     } else {
-//       // Intenta buscar el perfil por el nombre de usuario
-//       const profileRef = db
-//         .collection('profiles')
-//         .where('profileUsername', '==', identifier);
-//       const profileSnapshot = await profileRef.get();
-
-//       if (profileSnapshot.empty) {
-//         return res
-//           .status(401)
-//           .json({ changepassword: false, error: 'Credenciales incorrectas' });
-//       }
-
-//       // Obtén el primer perfil que coincida
-//       const profileDoc = profileSnapshot.docs[0];
-//       profileData = profileDoc.data();
-
-//       if (profileData.profileIsAdmin) {
-//         const currentDate = new Date();
-//         const passwordCreationDate = new Date(profileData.passwordCreationDate);
-//         const daysDifference = Math.floor(
-//           (currentDate - passwordCreationDate) / (1000 * 60 * 60 * 24)
-//         );
-
-//         console.log('currentDate:', currentDate);
-//         console.log('passwordCreationDate:', passwordCreationDate);
-//         console.log('dayDifference:', daysDifference);
-
-//         // If less than 1 minute has passed and it's an administrator, show an error
-//         if (daysDifference > 30) {
-//           return res.status(401).json({
-//             changepassword: true,
-//             error: 'You must change your password before logging in.',
-//           });
-//         }
-//       }
-//     }
-
-//     // Hashea la contraseña proporcionada con la sal almacenada en el perfil
-//     const hashedPassword = hashPassword(password, profileData.salt);
-
-//     // Compara el hash calculado con el hash almacenado en el perfil
-//     if (hashedPassword !== profileData.profilePassword) {
-//       return res
-//         .status(401)
-//         .json({ changepassword: false, error: 'Credenciales incorrectas' });
-//     }
-
-//     const secretKey = process.env.ACCESS_TOKEN_SECRET;
-
-//     const token = jwt.sign(
-//       {
-//         profileId: profileData.profileId,
-//       },
-//       secretKey
-//     );
-
-//     const responseData = {
-//       message: 'Autenticación exitosa',
-//       // Otros datos de usuario que desees incluir
-//       profileIsAdmin: profileData.profileIsAdmin,
-//       token,
-//       profileId: profileData.profileId,
-//       profileName: profileData.profileName,
-//       profileLastname: profileData.profileLastname,
-//       profilePicture: profileData.profilePicture,
-//       membershipId: profileData.membershipId,
-//       profileAdminLevel: profileData.profileAdminLevel,
-//       gymId: profileData.gymId,
-//       // ...
-//     };
-//     return res.status(200).json(responseData);
-//   } catch (error) {
-//     console.error('Error en el inicio de sesión:', error);
-//     return res.status(500).json({ error: 'Error interno del servidor' });
-//   }
-// };
-
-// Verifica si el usuario es un administrador
-// if (userData.profileIsAdmin) {
-//   // Si el usuario es administrador, verifica si su IP está permitida
-//   const clientIP = req.ip; // Obtiene la dirección IP del cliente
-//   console.log(clientIP);
-//   if (!allowedIPs.includes(clientIP)) {
-//     // IP no permitida para administradores
-//     return res.status(403).json({
-//       error: 'Acceso prohibido para administradores desde esta IP ',
-//       clientIP,
-//     });
-//   }
-// }
 
 const validateEmail = async (req, res) => {
   const { email } = req.body;
@@ -573,7 +462,7 @@ const sendVerificationCodeByEmail = async (email, verificationCode) => {
   const renderedTemplate = generateVerificationEmailTemplate(verificationCode);
 
   const mailOptions = {
-    from: 'No Reply - Verification Code 🔐" <goneoapp@gmail.com>',
+    from: 'NeoApp - Verification Code 🔐" <goneoapp@gmail.com>',
     to: email,
     subject: 'Verify your email address',
     html: renderedTemplate,
@@ -604,8 +493,6 @@ const saveVerificationCodeInFirestore = async (email, verificationCode) => {
       code: verificationCode,
       expirationTime: expirationTime,
     });
-
-    console.log('Código de verificación guardado con éxito.');
   } catch (error) {
     console.error('Error al guardar el código de verificación:', error);
     throw new Error('No se pudo guardar el código de verificación.');
@@ -693,8 +580,6 @@ const validateAdminCode = async (req, res) => {
 
           const profileDoc = profileSnapshot.docs[0];
           profileData = profileDoc.data();
-
-          console.log(profileData);
 
           const secretKey = process.env.ACCESS_TOKEN_SECRET;
 

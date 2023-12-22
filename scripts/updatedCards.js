@@ -15,8 +15,6 @@ async function updateGymIdForEmptyCards(numToUpdate, newGymId) {
         count++;
       }
     });
-
-    console.log(`Se actualizaron ${count} documentos con el nuevo gymId.`);
   } catch (error) {
     console.error('Error al actualizar los documentos:', error);
   }

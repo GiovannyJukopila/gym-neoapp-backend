@@ -89,8 +89,6 @@ async function generateAndSaveQRCodes() {
         profileIsAdmin: false,
       });
     }
-
-    console.log(`Generated QR Code ${i}`);
   }
 
   // Actualiza el valor de "lastProfileId" en el documento "metadata" al final de la generación
@@ -99,7 +97,6 @@ async function generateAndSaveQRCodes() {
 
 generateAndSaveQRCodes()
   .then(() => {
-    console.log('QR Codes generated and saved successfully.');
     process.exit();
   })
   .catch((error) => {

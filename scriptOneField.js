@@ -18,11 +18,8 @@ async function actualizarProfilesConCampo() {
       const profileData = profileDoc.data();
       if (!profileData.hasOwnProperty('profileFileWasUpload')) {
         await profileDoc.ref.update({ profileFileWasUpload: false });
-        console.log(`Se agregó profileFileWasUpload a ${profileDoc.id}`);
       }
     });
-
-    console.log('Campos actualizados exitosamente en la colección "profiles".');
   } catch (error) {
     console.error('Error al actualizar campos:', error);
   }

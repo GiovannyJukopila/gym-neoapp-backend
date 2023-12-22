@@ -1,6 +1,8 @@
 const fs = require('fs');
 const admin = require('firebase-admin');
 const { db } = require('../firebase');
+const PDFDocument = require('pdfkit-table');
+// const PDFDocumentTable = require('pdfkit-table');
 
 const ExcelJS = require('exceljs');
 
@@ -183,171 +185,6 @@ const generateGlobalReport = async (req, res) => {
   }
 };
 
-// const generateGlobalReport = async (req, res) => {
-//   try {
-//     const { gymId, startDate, endDate } = req.body;
-
-//     // Obtener el historial de pagos
-//     const paymentHistoryRef = db.collection('paymentHistory');
-//     const paymentSnapshot = await paymentHistoryRef
-//       .where('gymId', '==', gymId)
-//       .get();
-
-//     // Obtener las membresías asociadas al gimnasio
-//     const membershipsRef = db.collection('memberships');
-//     const membershipSnapshot = await membershipsRef
-//       .where('gymId', '==', gymId)
-//       .get();
-
-//     const userCountsByMonth = {};
-
-//     paymentSnapshot.forEach((paymentDoc) => {
-//       const profileData = paymentDoc.data();
-//       const paymentStartDate = new Date(profileData.paymentStartDate);
-//       const paymentEndDate = new Date(profileData.paymentEndDate);
-
-//       // Comprueba si el pago intersecta con el rango de fechas proporcionado
-
-//       const membershipId = profileData.membershipId;
-//       const membershipDoc = membershipSnapshot.docs.find(
-//         (doc) => doc.id === membershipId
-//       );
-//       const membershipData = membershipDoc ? membershipDoc.data() : null;
-//       const planName = membershipData ? membershipData.planName : '';
-
-//       let currentDate = new Date(paymentStartDate);
-//       currentDate.setDate(1); // Ajusta el currentDate al inicio del mes
-
-//       while (currentDate <= paymentEndDate) {
-//         const monthYearKey = `${currentDate.getFullYear()}-${(
-//           '0' +
-//           (currentDate.getMonth() + 1)
-//         ).slice(-2)}`;
-
-//         if (!userCountsByMonth[monthYearKey]) {
-//           userCountsByMonth[monthYearKey] = {};
-//           userCountsByMonth[monthYearKey]['Total Members'] = 0; // Agregar el campo de 'Total Members'
-//         }
-//         if (!userCountsByMonth[monthYearKey][planName]) {
-//           userCountsByMonth[monthYearKey][planName] = 0;
-//         }
-//         userCountsByMonth[monthYearKey][planName]++;
-//         userCountsByMonth[monthYearKey]['Total Members']++; // Incrementar el total de miembros
-
-//         currentDate.setMonth(currentDate.getMonth() + 1);
-//         currentDate.setDate(1); // Avanza al siguiente mes
-//       }
-//     });
-
-//     // Obtener todos los meses en inglés y ordenarlos
-//     const allMonths = Object.keys(userCountsByMonth).map((key) => {
-//       const [year, month] = key.split('-');
-//       return {
-//         key,
-//         month: new Date(year, parseInt(month) - 1).toLocaleString('default', {
-//           month: 'long',
-//         }),
-//       };
-//     });
-
-//     allMonths.sort((a, b) => {
-//       const monthOrder = {
-//         January: 0,
-//         February: 1,
-//         March: 2,
-//         April: 3,
-//         May: 4,
-//         June: 5,
-//         July: 6,
-//         August: 7,
-//         September: 8,
-//         October: 9,
-//         November: 10,
-//         December: 11,
-//       };
-//       return monthOrder[a.month] - monthOrder[b.month];
-//     });
-
-//     // Generar el archivo Excel
-//     const workbook = new ExcelJS.Workbook();
-//     const worksheet = workbook.addWorksheet('UserCountsByMonth');
-
-//     const allMembershipPlans = Array.from(
-//       new Set(
-//         membershipSnapshot.docs.map((membership) => membership.data().planName)
-//       )
-//     );
-
-//     // Obtener los nombres de planes presentes en los pagos
-//     const membershipHeaders = Array.from(
-//       new Set(
-//         paymentSnapshot.docs.map((doc) => {
-//           const membershipId = doc.data().membershipId;
-//           const membershipDoc = membershipSnapshot.docs.find(
-//             (membership) => membership.id === membershipId
-//           );
-//           return membershipDoc ? membershipDoc.data().planName : '';
-//         })
-//       )
-//     );
-
-//     // Agregar los nombres de planes que no estén presentes con un valor inicial de 0
-//     allMembershipPlans.forEach((plan) => {
-//       if (!membershipHeaders.includes(plan)) {
-//         membershipHeaders.push(plan);
-//       }
-//     });
-
-//     worksheet.columns = [
-//       { header: 'Date', key: 'date' },
-//       { header: 'Month', key: 'month' }, // Columna 'Month'
-//       { header: 'Total Members', key: 'Total Members' }, // Columna 'Total Members'
-//       ...membershipHeaders.map((header) => ({ header, key: header })),
-//     ];
-
-//     allMonths.forEach((month) => {
-//       const key = month.key;
-//       const rowData = {
-//         date: key,
-//         'Total Members': userCountsByMonth[key]['Total Members'],
-//         month: month.month,
-//       };
-
-//       membershipHeaders.forEach((header) => {
-//         rowData[header] = userCountsByMonth[key][header] || 0;
-//       });
-//       worksheet.addRow(rowData);
-//     });
-
-//     // Ajustar ancho de columnas
-//     worksheet.columns.forEach((column, index) => {
-//       let maxLength = 0;
-//       column.eachCell({ includeEmpty: true }, (cell) => {
-//         const columnLength = cell.value ? cell.value.toString().length : 10;
-//         if (columnLength > maxLength) {
-//           maxLength = columnLength;
-//         }
-//       });
-//       column.width = maxLength < 10 ? 10 : maxLength + 2;
-//     });
-
-//     // Enviar el archivo Excel como respuesta
-//     res.setHeader(
-//       'Content-Type',
-//       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-//     );
-//     res.setHeader(
-//       'Content-Disposition',
-//       'attachment; filename="userCountsByMonth.xlsx"'
-//     );
-//     await workbook.xlsx.write(res);
-//     res.end();
-//   } catch (error) {
-//     console.error('Error fetching profiles:', error);
-//     res.status(500).json({ error: 'Internal server error' });
-//   }
-// };
-
 const generateReportByMembership = async (req, res) => {
   try {
     const { gymId, membershipId, membershipName, startDate, endDate } =
@@ -486,7 +323,6 @@ const generateReportByMembership = async (req, res) => {
       column.width = maxLength < 10 ? 10 : maxLength + 2;
     });
 
-    // Enviar el archivo Excel como respuesta
     res.setHeader(
       'Content-Type',
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
@@ -503,143 +339,343 @@ const generateReportByMembership = async (req, res) => {
   }
 };
 
-// const generateReportByMembership = async (req, res) => {
-//   try {
-//     const { gymId, membershipId, startDate, endDate } = req.body;
+const getUtcOffset = (timeZoneStr) => {
+  const sign = timeZoneStr.includes('-') ? -1 : 1;
+  const offsetStr = timeZoneStr.split(/[\+\-]/)[1];
+  return parseInt(offsetStr, 10) * sign;
+};
 
-//     const paymentHistoryRef = db.collection('paymentHistory');
-//     const paymentSnapshot = await paymentHistoryRef
-//       .where('gymId', '==', gymId)
-//       .where('membershipId', '==', membershipId)
-//       .get();
+const generateDailyReport = async (req, res) => {
+  try {
+    const { gymId } = req.params;
+    const doc = new PDFDocument();
 
-//     const userCountsByMonth = {};
+    res.setHeader(
+      'Content-Disposition',
+      'attachment; filename="daily_report.pdf"'
+    );
+    doc.pipe(res);
 
-//     paymentSnapshot.forEach((paymentDoc) => {
-//       const profileData = paymentDoc.data();
-//       const paymentStartDate = new Date(profileData.paymentStartDate);
-//       const paymentEndDate = new Date(profileData.paymentEndDate);
+    // Título del informe
+    doc.rect(0, 0, 612, 80).fill('#FFA500');
+    doc
+      .fontSize(25)
+      .fill('white')
+      .text('DAILY REPORT', 50, 30, { align: 'left', valign: 'center' });
 
-//       // Comprueba si el pago intersecta con el rango de fechas proporcionado
-//       if (
-//         (paymentStartDate <= new Date(endDate) &&
-//           paymentStartDate >= new Date(startDate)) ||
-//         (paymentEndDate <= new Date(endDate) &&
-//           paymentEndDate >= new Date(startDate))
-//       ) {
-//         let currentDate = new Date(paymentStartDate);
-//         currentDate.setDate(1); // Ajusta el currentDate al inicio del mes
+    const gymSnapshot = await admin
+      .firestore()
+      .collection('gyms')
+      .doc(gymId)
+      .get();
+    const gymData = gymSnapshot.data();
+    const gymTimeZone = gymData.gymTimeZone;
+    const utcOffset = getUtcOffset(gymTimeZone);
 
-//         while (currentDate <= paymentEndDate) {
-//           const monthYearKey = `${currentDate.getFullYear()}-${(
-//             '0' +
-//             (currentDate.getMonth() + 1)
-//           ).slice(-2)}`;
+    const utcDate = new Date();
+    const localTimeInMilliseconds = utcDate.getTime() - utcOffset * 60 * 1000;
 
-//           if (!userCountsByMonth[monthYearKey]) {
-//             userCountsByMonth[monthYearKey] = {};
-//             userCountsByMonth[monthYearKey]['Total Members'] = 0; // Agregar el campo de 'Total Members'
-//           }
+    const currentDate = new Date(localTimeInMilliseconds);
+    currentDate.setUTCHours(0, 0, 0, 0);
 
-//           userCountsByMonth[monthYearKey][membershipId] = userCountsByMonth[
-//             monthYearKey
-//           ][membershipId]
-//             ? userCountsByMonth[monthYearKey][membershipId] + 1
-//             : 1;
+    const dateString = currentDate.toISOString().split('T')[0];
 
-//           userCountsByMonth[monthYearKey]['Total Members']++; // Incrementar el total de miembros
+    const tableData = [];
 
-//           currentDate.setMonth(currentDate.getMonth() + 1);
-//           currentDate.setDate(1); // Avanza al siguiente mes
-//         }
-//       }
-//     });
+    const newMembersQuery = await admin
+      .firestore()
+      .collection('paymentHistory')
+      .where('gymId', '==', gymId)
+      .where('paymentType', '==', 'new')
+      .where('paymentDate', '>=', dateString)
+      .get();
 
-//     // Obtener todos los meses en inglés y ordenarlos
-//     const allMonths = Object.keys(userCountsByMonth).map((key) => {
-//       const [year, month] = key.split('-');
-//       return {
-//         key,
-//         month: new Date(year, parseInt(month) - 1).toLocaleString('default', {
-//           month: 'long',
-//         }),
-//       };
-//     });
+    const totalNewMembers = newMembersQuery.size;
 
-//     allMonths.sort((a, b) => {
-//       const monthOrder = {
-//         January: 0,
-//         February: 1,
-//         March: 2,
-//         April: 3,
-//         May: 4,
-//         June: 5,
-//         July: 6,
-//         August: 7,
-//         September: 8,
-//         October: 9,
-//         November: 10,
-//         December: 11,
-//       };
-//       return monthOrder[a.month] - monthOrder[b.month];
-//     });
+    const renewedMembersQuery = await admin
+      .firestore()
+      .collection('paymentHistory')
+      .where('gymId', '==', gymId)
+      .where('paymentType', '==', 'renew')
+      .where('paymentDate', '>=', dateString)
+      .get();
 
-//     // Generar el archivo Excel
-//     const workbook = new ExcelJS.Workbook();
-//     const worksheet = workbook.addWorksheet('UserCountsByMonth');
+    const totalRenewedMembers = renewedMembersQuery.size;
 
-//     const membershipHeaders = [membershipId, 'Total Members']; // Lista de columnas (membershipId y Total Members)
+    const startOfDay = new Date(`${dateString}T00:00:00`);
+    const endOfDay = new Date(`${dateString}T23:59:59.999`);
 
-//     worksheet.columns = [
-//       { header: 'Date', key: 'date' },
-//       { header: 'Month', key: 'month' }, // Columna 'Month'
-//       ...membershipHeaders.map((header) => ({ header, key: header })),
-//     ];
+    const todayCheckinsQuery = await admin
+      .firestore()
+      .collection('accessHistory')
+      .where('gymId', '==', gymId)
+      .where('action', '==', 'check-in')
+      .where('timestamp', '>=', startOfDay)
+      .where('timestamp', '<=', endOfDay)
+      .get();
 
-//     allMonths.forEach((month) => {
-//       const key = month.key;
-//       const rowData = {
-//         date: key,
-//         'Total Members': userCountsByMonth[key]['Total Members'],
-//         month: month.month,
-//       };
+    const totalCheckins = todayCheckinsQuery.size;
+    // Today's Revenue
 
-//       membershipHeaders.forEach((header) => {
-//         rowData[header] = userCountsByMonth[key][header] || 0;
-//       });
-//       worksheet.addRow(rowData);
-//     });
+    const todayCheckoutsQuery = await admin
+      .firestore()
+      .collection('accessHistory')
+      .where('gymId', '==', gymId)
+      .where('action', '==', 'check-out')
+      .where('timestamp', '>=', startOfDay)
+      .where('timestamp', '<=', endOfDay)
+      .get();
 
-//     // Ajustar ancho de columnas
-//     worksheet.columns.forEach((column, index) => {
-//       let maxLength = 0;
-//       column.eachCell({ includeEmpty: true }, (cell) => {
-//         const columnLength = cell.value ? cell.value.toString().length : 10;
-//         if (columnLength > maxLength) {
-//           maxLength = columnLength;
-//         }
-//       });
-//       column.width = maxLength < 10 ? 10 : maxLength + 2;
-//     });
+    const totalCheckouts = todayCheckoutsQuery.size;
 
-//     // Enviar el archivo Excel como respuesta
-//     res.setHeader(
-//       'Content-Type',
-//       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-//     );
-//     res.setHeader(
-//       'Content-Disposition',
-//       'attachment; filename="userCountsByMonth.xlsx"'
-//     );
-//     await workbook.xlsx.write(res);
-//     res.end();
-//   } catch (error) {
-//     console.error('Error fetching profiles:', error);
-//     res.status(500).json({ error: 'Internal server error' });
-//   }
-// };
+    const guestsQuery = await admin
+      .firestore()
+      .collection('guests')
+      .where('gymId', '==', gymId)
+      .where('currentDate', '==', dateString)
+      .get();
+
+    const totalGuests = guestsQuery.size;
+
+    const frozenQuery = await admin
+      .firestore()
+      .collection('paymentHistory')
+      .where('gymId', '==', gymId)
+      .where('paymentType', '==', 'Freeze')
+      .where('paymentDate', '==', dateString)
+      .get();
+
+    let totalFrozen = 0; // Inicializa la variable para evitar errores
+
+    if (frozenQuery) {
+      totalFrozen = frozenQuery.size;
+    }
+
+    // Ahora puedes usar totalFrozen en tu lógica
+
+    const unFrozenQuery = await admin
+      .firestore()
+      .collection('paymentHistory')
+      .where('gymId', '==', gymId)
+      .where('paymentType', '==', 'UnFreeze')
+      .where('paymentDate', '==', dateString)
+      .get();
+
+    const totalUnfrozen = unFrozenQuery.size;
+
+    const paymentsRef = admin
+      .firestore()
+      .collection('paymentHistory')
+      .where('gymId', '==', gymId)
+      .where('paymentDate', '==', dateString);
+
+    let totalReceive = 0;
+    const querySnapshot = await paymentsRef.get();
+
+    const tablesByPaymentType = {
+      Renew: [],
+      New: [],
+      Freeze: [],
+      Unfreeze: [],
+    };
+
+    for (const doc of querySnapshot.docs) {
+      const paymentData = doc.data();
+      const paymentAmount = parseFloat(paymentData.paymentAmount); // Convertir a número
+
+      if (!isNaN(paymentAmount)) {
+        totalReceive += paymentAmount;
+      }
+
+      try {
+        const profileSnapshot = await admin
+          .firestore()
+          .collection('profiles')
+          .doc(paymentData.profileId)
+          .get();
+
+        const membershipSnapshot = await admin
+          .firestore()
+          .collection('memberships')
+          .doc(paymentData.membershipId)
+          .get();
+
+        const profileData = profileSnapshot.data();
+        const membershipData = membershipSnapshot.data();
+
+        const signUpDate = paymentData.paymentDate; // Usar el dato que corresponda
+        const fullName = `${profileData.profileName} ${profileData.profileLastname}`;
+        const cardNo = profileData.cardSerialNumber;
+        const membershipType = membershipData.planName
+          ? membershipData.planName
+          : '';
+        const netRevenue = `€ ${paymentData.paymentAmount}`;
+        const paymentType = paymentData.paymentType;
+
+        if (paymentType === 'renew') {
+          tablesByPaymentType.Renew.push([
+            signUpDate,
+            fullName,
+            cardNo,
+            membershipType,
+            netRevenue,
+            paymentType,
+          ]);
+        } else if (paymentType === 'new') {
+          tablesByPaymentType.New.push([
+            signUpDate,
+            fullName,
+            cardNo,
+            membershipType,
+            netRevenue,
+            paymentType,
+          ]);
+        } else if (paymentType === 'Freeze') {
+          tablesByPaymentType.Freeze.push([
+            signUpDate,
+            fullName,
+            cardNo,
+            membershipType,
+            netRevenue,
+            paymentType,
+          ]);
+        } else if (paymentType === 'UnFreeze') {
+          tablesByPaymentType.Unfreeze.push([
+            signUpDate,
+            fullName,
+            cardNo,
+            membershipType,
+            netRevenue,
+            paymentType,
+          ]);
+        }
+      } catch (error) {
+        console.error('Error fetching profiles/memberships:', error);
+      }
+    }
+
+    // Resto del código después de que todas las promesas se resuelvan
+
+    doc.fontSize(18).text(`SUMMARY  ${dateString}`, { bold: true }).moveDown(1);
+
+    //First table
+
+    const summaryTableData = [
+      ["Today's revenue", `€ ${totalReceive}`],
+      ["Today's new memberships", totalNewMembers],
+      ["Today's new renewal", totalRenewedMembers],
+      ["Today's check-in", totalCheckins],
+      ["Today's check-out", totalCheckouts],
+      ["Today's Guest's", totalGuests],
+      ["Today's Memberships Frozen", totalFrozen],
+      ["Today's Memberships UnFrozen", totalUnfrozen],
+    ];
+
+    const summaryTable = {
+      headers: ['Title', 'Value'],
+      rows: summaryTableData,
+    };
+
+    doc.table(summaryTable, {
+      prepareHeader: () =>
+        doc.font('Helvetica-Bold').fontSize(10).fillColor('black'),
+      prepareRow: (row, indexColumn, indexRow, rectRow, rectCell) => {
+        doc.font('Helvetica').fontSize(10);
+        doc.fillColor('black'); // Establece el color de la fuente aquí
+
+        // Configuración de estilos para las celdas
+
+        // Asegúrate de dibujar solo el borde exterior de la tabla
+      },
+
+      borderHorizontalWidths: (i) => (i === -1 ? 1 : 0),
+      borderVerticalWidths: (i) => (i === -1 ? 1 : 0),
+      borderColor: (i) => (i === -1 ? 'black' : 'gray'),
+      padding: 10,
+      margins: { top: 50, bottom: 100, left: 50, right: 50 },
+      // Ubicación vertical de la tabla en el documento
+    });
+
+    // Second table
+
+    const headersByPaymentType = {
+      Renew: [
+        'Renewal Date',
+        'Full Name',
+        'Card No',
+        'Membership Type',
+        'Net Revenue',
+        'Payment Type',
+      ],
+      New: [
+        'Sign Up Date',
+        'Full Name',
+        'Card No',
+        'Membership Type',
+        'Net Revenue',
+        'Payment Type',
+      ],
+      Freeze: [
+        'Freeze Date',
+        'Full Name',
+        'Card No',
+        'Membership Type',
+        'Net Revenue',
+        'Payment Type',
+      ],
+      Unfreeze: [
+        'Unfreeze Date',
+        'Full Name',
+        'Card No',
+        'Membership Type',
+        'Net Revenue',
+        'Payment Type',
+      ],
+    };
+
+    for (const paymentType in tablesByPaymentType) {
+      if (Object.hasOwnProperty.call(tablesByPaymentType, paymentType)) {
+        const tableData = tablesByPaymentType[paymentType];
+        if (tableData.length > 0) {
+          const tableHeaders = headersByPaymentType[paymentType];
+          // Crear una tabla por tipo de pago
+          const table = {
+            title: `${paymentType} Payments Details`,
+            headers: tableHeaders.map((header) => ({
+              label: header,
+              property: header.toLowerCase(),
+              width: 80,
+              renderer: null,
+            })),
+            rows: tableData.map((data) => data.map((cell) => String(cell))),
+          };
+
+          // Generar la tabla en el documento PDF
+          doc.table(table, {
+            prepareHeader: () => doc.font('Helvetica-Bold').fontSize(10),
+            prepareRow: (row, indexColumn, indexRow, rectRow, rectCell) => {
+              doc.font('Helvetica').fontSize(10);
+              // ... lógica para preparar las filas
+            },
+            borderHorizontalWidths: (i) => 0.8,
+            borderVerticalWidths: (i) => 0.8,
+            borderColor: (i) => (i === -1 ? 'black' : 'gray'),
+            padding: 10,
+            margins: { top: 50, bottom: 50, left: 50, right: 50 },
+          });
+        }
+      }
+    }
+
+    doc.end();
+  } catch (error) {
+    console.error(error);
+    res.status(500).send('Error generating the report');
+  }
+};
 
 module.exports = {
   generateGlobalReport,
   generateReportByMembership,
+  generateDailyReport,
 };

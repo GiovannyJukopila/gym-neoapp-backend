@@ -116,46 +116,78 @@ const getCurrentMembersByMemberships = async (req, res) => {
   }
 };
 
+const getUtcOffset = (timeZoneStr) => {
+  const sign = timeZoneStr.includes('-') ? -1 : 1;
+  const offsetStr = timeZoneStr.split(/[\+\-]/)[1];
+  return parseInt(offsetStr, 10) * sign;
+};
+
 const getCheckInReport = async (req, res) => {
   const { gymId } = req.params;
   const checkInRef = db.collection('accessHistory');
 
   try {
+    const gymSnapshot = await admin
+      .firestore()
+      .collection('gyms')
+      .doc(gymId)
+      .get();
+    const gymData = gymSnapshot.data();
+    const gymTimeZone = gymData.gymTimeZone;
+    const utcOffset = getUtcOffset(gymTimeZone);
+
+    const utcDate = new Date();
+    const localTimeInMilliseconds = utcDate.getTime() - utcOffset * 60 * 1000;
+
+    const currentDate = new Date(localTimeInMilliseconds);
+    currentDate.setUTCHours(0, 0, 0, 0);
+
+    const dateString = currentDate.toISOString().split('T')[0];
+
+    const startOfDay = new Date(`${dateString}T00:00:00`);
+    const endOfDay = new Date(`${dateString}T23:59:59.999`);
+
+    const todayCheckinsQuery = await admin
+      .firestore()
+      .collection('accessHistory')
+      .where('action', '==', 'check-in')
+      .where('timestamp', '>=', startOfDay)
+      .where('timestamp', '<=', endOfDay)
+      .get();
+
+    let totalCheckInsToday = 0;
+
+    if (!todayCheckinsQuery.empty) {
+      totalCheckInsToday = todayCheckinsQuery.size;
+    }
+
+    const sevenDaysAgo = new Date(
+      currentDate.getTime() - 7 * 24 * 60 * 60 * 1000
+    );
+
     const snapshot = await checkInRef
       .where('gymId', '==', gymId)
       .where('action', '==', 'check-in')
+      .where('timestamp', '>=', sevenDaysAgo)
       .get();
 
-    const now = new Date(); // Fecha actual
-    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000); // Fecha hace 7 días
-
     let totalCheckInsLastSevenDays = 0;
-    let totalCheckInsToday = 0;
 
     snapshot.forEach((doc) => {
-      const timestamp = new Date(doc.data().timestamp);
+      const timestamp = doc.data().timestamp;
 
       if (timestamp >= sevenDaysAgo) {
         totalCheckInsLastSevenDays++;
       }
-
-      if (
-        timestamp.toISOString().split('T')[0] ===
-        now.toISOString().split('T')[0]
-      ) {
-        totalCheckInsToday++;
-      }
     });
 
-    // Enviar los datos recopilados al frontend
     const responseData = {
       totalCheckInsLastSevenDays,
-      totalCheckInsToday,
+      totalCheckInsToday, // Corregido el nombre de la variable aquí
     };
 
     res.status(200).json(responseData);
   } catch (error) {
-    // Manejo de errores
     console.error('Error al obtener los datos:', error);
     res
       .status(500)
@@ -163,24 +195,40 @@ const getCheckInReport = async (req, res) => {
   }
 };
 
+const getUtcOffsetInMilliseconds = (timeZoneStr) => {
+  const sign = timeZoneStr.includes('-') ? -1 : 1;
+  const offsetStr = timeZoneStr.split(/[\+\-]/)[1];
+  const offsetInMinutes = parseInt(offsetStr, 10);
+  return offsetInMinutes * sign * 60 * 1000;
+};
+
 const getPaymentReport = async (req, res) => {
   const { gymId } = req.params;
   const paymentRef = db.collection('paymentHistory');
 
   try {
-    const snapshot = await paymentRef.where('gymId', '==', gymId).get();
+    const gymSnapshot = await db.collection('gyms').doc(gymId).get();
+    const gymData = gymSnapshot.data();
+    const gymTimeZone = gymData.gymTimeZone;
 
-    const now = new Date(); // Fecha actual
+    const utcOffset = getUtcOffsetInMilliseconds(gymTimeZone);
+
+    const utcDate = new Date();
+    const localTimeInMilliseconds = utcDate.getTime() + utcOffset;
+
+    const now = new Date(localTimeInMilliseconds);
     const todayStart = new Date(
       now.getFullYear(),
       now.getMonth(),
       now.getDate()
-    ); // Inicio del día actual
+    );
     const todayEnd = new Date(
       now.getFullYear(),
       now.getMonth(),
       now.getDate() + 1
-    ); // Fin del día actual
+    );
+
+    const snapshot = await paymentRef.where('gymId', '==', gymId).get();
 
     let totalPaymentsLastSevenDays = 0;
     let totalPaymentsToday = 0;
@@ -190,11 +238,11 @@ const getPaymentReport = async (req, res) => {
       let paymentDate;
 
       if (paymentType === 'new') {
-        paymentDate = new Date(doc.data().paymentStartDate).getTime();
+        paymentDate = new Date(doc.data().paymentDate).getTime() + utcOffset;
       } else if (paymentType === 'renew') {
-        paymentDate = new Date(doc.data().renewDate).getTime();
+        paymentDate = new Date(doc.data().renewDate).getTime() + utcOffset;
       } else {
-        return; // Si el tipo de pago no es 'new' o 'renew', pasamos al siguiente documento
+        return;
       }
 
       if (
@@ -212,7 +260,6 @@ const getPaymentReport = async (req, res) => {
       }
     });
 
-    // Enviar los datos recopilados al frontend
     const responseData = {
       totalPaymentsLastSevenDays,
       totalPaymentsToday,
@@ -220,11 +267,10 @@ const getPaymentReport = async (req, res) => {
 
     res.status(200).json(responseData);
   } catch (error) {
-    // Manejo de errores
-    console.error('Error al obtener los datos:', error);
+    console.error('Error fetching data:', error);
     res
       .status(500)
-      .json({ error: 'Ocurrió un error al procesar la solicitud.' });
+      .json({ error: 'An error occurred processing the request.' });
   }
 };
 

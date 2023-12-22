@@ -2,6 +2,7 @@ const express = require('express');
 const {
   getAllProfiles,
   getProfile,
+  searchProfile,
   getProfileByEmail,
   createProfile,
   updateProfile,
@@ -25,6 +26,8 @@ const serviceAccount = require('../cred.json');
 router.get('/get/all', getAllProfiles);
 
 router.get('/get/:id', getProfile);
+
+router.get('/search', searchProfile);
 
 router.post('/get/profileByEmail', getProfileByEmail);
 

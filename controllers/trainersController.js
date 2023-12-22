@@ -151,7 +151,38 @@ function formatDate(date) {
   return date; // Devolver tal cual si no es una instancia de Date ni una cadena válida
 }
 
+const searchTrainer = async (req, res) => {
+  try {
+    const term = req.query.term.toLowerCase();
+    const gymId = req.query.gymId;
+
+    const profilesRef = db.collection('profiles');
+    const snapshot = await profilesRef
+      .where('gymId', '==', gymId)
+      .where('role', '==', 'trainer')
+      .get();
+
+    const profiles = [];
+    snapshot.forEach((doc) => {
+      const profile = doc.data();
+      // Aplicar filtro por term en profileName y profileLastname
+      if (
+        profile.profileName.toLowerCase().includes(term) ||
+        profile.profileLastname.toLowerCase().includes(term)
+      ) {
+        profiles.push(profile);
+      }
+    });
+
+    res.json(profiles);
+  } catch (error) {
+    console.error('Error fetching profiles:', error);
+    res.status(500).send('Error fetching profiles');
+  }
+};
+
 module.exports = {
   createTrainer,
   getTrainers,
+  searchTrainer,
 };

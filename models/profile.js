@@ -32,7 +32,20 @@ class Profile {
     notCheckOut,
     wasCheckIn,
     role,
-    profileGender
+    profileGender,
+    profileLastMembershipPrice,
+    profileWasDiscount,
+    profileWasComplementary,
+    profileComplementaryReason,
+    profileDiscountType,
+    profileDiscountPercentage,
+    profileDiscountValue,
+    profileTotalReceive,
+    renewMembershipInQueue,
+    renewIsInQueue,
+    profileCoupleName,
+    profileCoupleEmail,
+    profileIsACouple
   ) {
     this.profileId = profileId;
     this.cardSerialNumber = cardSerialNumber;
@@ -67,6 +80,20 @@ class Profile {
     this.wasCheckIn = wasCheckIn;
     this.role = role;
     this.profileGender = profileGender;
+
+    this.profileLastMembershipPrice = profileLastMembershipPrice;
+    this.profileWasDiscount = profileWasDiscount;
+    this.profileWasComplementary = profileWasComplementary;
+    this.profileComplementaryReason = profileComplementaryReason;
+    this.profileDiscountType = profileDiscountType;
+    this.profileDiscountPercentage = profileDiscountPercentage;
+    this.profileDiscountValue = profileDiscountValue;
+    this.profileTotalReceive = profileTotalReceive;
+    this.renewMembershipInQueue = renewMembershipInQueue;
+    this.renewIsInQueue = renewIsInQueue;
+    this.profileCoupleName = profileCoupleName;
+    this.profileCoupleEmail = profileCoupleEmail;
+    this.profileIsACouple = profileIsACouple;
   }
 }
 
