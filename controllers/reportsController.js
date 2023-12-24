@@ -540,6 +540,14 @@ const generateDailyReport = async (req, res) => {
             paymentType,
           ]);
         } else if (paymentType === 'UnFreeze') {
+          console.log(
+            signUpDate,
+            fullName,
+            cardNo,
+            membershipType,
+            netRevenue,
+            paymentType
+          );
           tablesByPaymentType.Unfreeze.push([
             signUpDate,
             fullName,
@@ -592,7 +600,7 @@ const generateDailyReport = async (req, res) => {
       borderVerticalWidths: (i) => (i === -1 ? 1 : 0),
       borderColor: (i) => (i === -1 ? 'black' : 'gray'),
       padding: 10,
-      margins: { top: 50, bottom: 100, left: 50, right: 50 },
+      margins: { top: 50, bottom: 50, left: 50, right: 50 },
       // Ubicación vertical de la tabla en el documento
     });
 
@@ -615,14 +623,6 @@ const generateDailyReport = async (req, res) => {
         'Net Revenue',
         'Payment Type',
       ],
-      Freeze: [
-        'Freeze Date',
-        'Full Name',
-        'Card No',
-        'Membership Type',
-        'Net Revenue',
-        'Payment Type',
-      ],
       Unfreeze: [
         'Unfreeze Date',
         'Full Name',
@@ -631,9 +631,17 @@ const generateDailyReport = async (req, res) => {
         'Net Revenue',
         'Payment Type',
       ],
+      Freeze: [
+        'Freeze Date',
+        'Full Name',
+        'Card No',
+        'Membership Type',
+        'Net Revenue',
+        'Payment Type',
+      ],
     };
 
-    for (const paymentType in tablesByPaymentType) {
+    for (const paymentType of ['Renew', 'New', 'Unfreeze', 'Freeze']) {
       if (Object.hasOwnProperty.call(tablesByPaymentType, paymentType)) {
         const tableData = tablesByPaymentType[paymentType];
         if (tableData.length > 0) {

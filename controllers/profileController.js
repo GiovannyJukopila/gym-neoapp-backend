@@ -46,7 +46,7 @@ const createProfile = async (req, res) => {
         profileAdminLevel: req.body.profileAdminLevel,
         profileName: req.body.profileName,
         profileLastname: req.body.profileLastname,
-        profileEmail: req.body.profileEmail,
+        profileEmail: req.body.profileEmail.toLowerCase(),
         profileBirthday:
           req.body.profileBirthday !== undefined
             ? req.body.profileBirthday
@@ -82,8 +82,8 @@ const createProfile = async (req, res) => {
             ? req.body.profileDiscountValue
             : '',
         profileTotalReceive: req.body.profileTotalReceive,
-        profileCoupleName: req.body.profileCoupleName,
-        profileCoupleEmail: req.body.profileCoupleEmail,
+        profileCoupleName: req?.body?.profileCoupleName,
+        profileCoupleEmail: req?.body?.profileCoupleEmail,
       };
 
       // Crea el nuevo perfil
@@ -724,7 +724,7 @@ const updateProfileEndDate = async (req, res) => {
 
     // Check if the 'renewMembershipInQueue' object already exists in the profile
     const profileData = profileDoc.data();
-    if (profileData.renewMembershipInQueue.renewIsInQueue) {
+    if (profileData?.renewMembershipInQueue?.renewIsInQueue) {
       return res
         .status(400)
         .json({ error: 'There is already a plan renewal in queue' });
@@ -796,31 +796,37 @@ const updateProfileEndDate = async (req, res) => {
 
 const searchProfile = async (req, res) => {
   try {
-    const term = req.query.term.toLowerCase();
-    const gymId = req.query.gymId;
+    const partialEmail = req.query.term.toLowerCase(); // Obtén el correo electrónico parcial de la solicitud
+    const gymId = req.query.gymId; // Obtén el gymId de la solicitud
 
-    const profilesRef = db.collection('profiles');
-    const snapshot = await profilesRef
-      .where('gymId', '==', gymId)
-      .where('role', '==', 'member')
+    // Realiza una consulta a la colección 'profiles' filtrando por gymId y buscando perfiles que contengan el correo electrónico parcial
+    const querySnapshot = await db
+      .collection('profiles')
+      .where('gymId', '==', gymId) // Filtrar por gymId
+      .where('profileEmail', '>=', partialEmail)
+      .where('profileEmail', '<=', partialEmail + '\uf8ff')
       .get();
 
-    const profiles = [];
-    snapshot.forEach((doc) => {
-      const profile = doc.data();
-      // Aplicar filtro por term en profileName y profileLastname
-      if (
-        profile.profileName.toLowerCase().includes(term) ||
-        profile.profileLastname.toLowerCase().includes(term)
-      ) {
-        profiles.push(profile);
-      }
-    });
+    if (querySnapshot.empty) {
+      // Si no se encuentra ningún perfil con el correo electrónico parcial, responde con un mensaje apropiado
+      res.status(404).json({ message: 'Perfiles no encontrados' });
+    } else {
+      // Si se encuentran perfiles, obtén sus datos
+      const profiles = [];
+      querySnapshot.forEach((doc) => {
+        profiles.push(doc.data());
+      });
 
-    res.json(profiles);
+      res.json(profiles);
+    }
   } catch (error) {
-    console.error('Error fetching profiles:', error);
-    res.status(500).send('Error fetching profiles');
+    console.error(
+      'Error al buscar perfiles por correo electrónico parcial:',
+      error
+    );
+    res.status(500).json({
+      error: 'Error al buscar perfiles por correo electrónico parcial',
+    });
   }
 };
 
