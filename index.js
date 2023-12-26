@@ -20,8 +20,8 @@ app.use('/api/', routerApi);
 app.use(express.static('/var/www/html'));
 
 // Ruta para el endpoint '/'
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, '../../var/www/html/index.html'));
+app.get('/*', (req, res) => {
+  res.sendFile(path.join('/var/www/html', 'index.html'));
 });
 
 //routerApi(app);
