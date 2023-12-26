@@ -18,10 +18,14 @@ app.use(express.json());
 
 app.use('/api/', routerApi);
 
-app.use(express.static(path.join(__dirname, '/var/www/html')));
+const indexPath = '/var/www/html/index.html';
 
+// Ruta estática
+app.use(express.static(path.dirname(indexPath)));
+
+// Manejo de rutas no coincidentes con el archivo 'index.html'
 app.get('/*', (req, res) => {
-  res.sendFile(path.join(__dirname, '/var/www/html/index.html'));
+  res.sendFile(indexPath);
 });
 
 //routerApi(app);
