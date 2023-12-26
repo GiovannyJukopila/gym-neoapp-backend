@@ -21,7 +21,7 @@ app.use(express.static('/var/www/html'));
 
 // Ruta para el endpoint '/'
 app.get('/', (req, res) => {
-  res.sendFile('/var/www/html/index.html');
+  res.sendFile(path.join(__dirname, '../../var/www/html/index.html'));
 });
 
 //routerApi(app);
