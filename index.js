@@ -17,11 +17,11 @@ app.use(express.json());
 // app.use(bodyParser.json());
 
 app.use('/api/', routerApi);
-app.use(express.static('/home/ubuntu/var/www/html'));
+app.use(express.static('/var/www/html'));
 
-// Para el endpoint '/'
+// Ruta para el endpoint '/'
 app.get('/', (req, res) => {
-  res.sendFile('/home/ubuntu/var/www/html/index.html');
+  res.sendFile('/var/www/html/index.html');
 });
 
 //routerApi(app);
