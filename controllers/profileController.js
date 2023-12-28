@@ -796,39 +796,103 @@ const updateProfileEndDate = async (req, res) => {
 
 const searchProfile = async (req, res) => {
   try {
-    const partialEmail = req.query.term.toLowerCase(); // Obtén el correo electrónico parcial de la solicitud
+    const searchTerm = req.query.term; // Obtén el término de búsqueda y elimina espacios adicionales
     const gymId = req.query.gymId; // Obtén el gymId de la solicitud
 
-    // Realiza una consulta a la colección 'profiles' filtrando por gymId y buscando perfiles que contengan el correo electrónico parcial
-    const querySnapshot = await db
-      .collection('profiles')
-      .where('gymId', '==', gymId) // Filtrar por gymId
-      .where('profileEmail', '>=', partialEmail)
-      .where('profileEmail', '<=', partialEmail + '\uf8ff')
-      .get();
+    let profiles = [];
 
-    if (querySnapshot.empty) {
-      // Si no se encuentra ningún perfil con el correo electrónico parcial, responde con un mensaje apropiado
-      res.status(404).json({ message: 'Perfiles no encontrados' });
-    } else {
-      // Si se encuentran perfiles, obtén sus datos
-      const profiles = [];
-      querySnapshot.forEach((doc) => {
+    const profilesRef = db.collection('profiles');
+
+    // Verificar si el término de búsqueda contiene un espacio (suponiendo que es nombre y apellido)
+    if (searchTerm.includes(' ')) {
+      const [firstName, ...lastNameArr] = searchTerm.split(' ');
+      const lastName = lastNameArr.join(' '); // Si el apellido tiene espacios
+
+      const nameSnapshot = await profilesRef
+        .where('gymId', '==', gymId) // Filtrar por gymId
+        .where('role', '==', 'member')
+        .where('profileName', '==', `${firstName} ${lastName}`)
+        .get();
+
+      nameSnapshot.forEach((doc) => {
         profiles.push(doc.data());
       });
 
+      const lastNameSnapshot = await profilesRef
+        .where('gymId', '==', gymId) // Filtrar por gymId
+        .where('role', '==', 'member')
+        .where('profileLastname', '==', lastName)
+        .get();
+
+      lastNameSnapshot.forEach((doc) => {
+        profiles.push(doc.data());
+      });
+    } else {
+      // Si no hay espacio, buscar coincidencias en profileName y profileLastName
+      const snapshot = await profilesRef
+        .where('gymId', '==', gymId) // Filtrar por gymId
+        .where('role', '==', 'member')
+        .where('profileName', '>=', searchTerm)
+        .where('profileName', '<=', searchTerm + '\uf8ff')
+        .get();
+
+      snapshot.forEach((doc) => {
+        profiles.push(doc.data());
+      });
+    }
+
+    if (profiles.length === 0) {
+      res.status(404).json({ message: 'Perfiles no encontrados' });
+    } else {
       res.json(profiles);
     }
   } catch (error) {
-    console.error(
-      'Error al buscar perfiles por correo electrónico parcial:',
-      error
-    );
+    console.error('Error al buscar perfiles por término de búsqueda:', error);
     res.status(500).json({
-      error: 'Error al buscar perfiles por correo electrónico parcial',
+      error: 'Error al buscar perfiles por término de búsqueda',
     });
   }
 };
+
+// const searchProfile = async (req, res) => {
+//   try {
+//     let partialName = req.query.term; // Obtén el correo electrónico parcial de la solicitud
+//     partialName = partialName.charAt(0).toUpperCase() + partialName.slice(1);
+
+//     console.log(partialName);
+//     const gymId = req.query.gymId; // Obtén el gymId de la solicitud
+
+//     // Realiza una consulta a la colección 'profiles' filtrando por gymId y buscando perfiles que contengan el correo electrónico parcial
+//     const querySnapshot = await db
+//       .collection('profiles')
+//       .where('gymId', '==', gymId) // Filtrar por gymId
+//       .where('role', '==', 'member')
+//       .where('profilelastName', '>=', partialName)
+//       .where('profilelastName', '<=', partialName + '\uf8ff')
+//       .get();
+
+//     if (querySnapshot.empty) {
+//       // Si no se encuentra ningún perfil con el correo electrónico parcial, responde con un mensaje apropiado
+//       res.status(404).json({ message: 'Perfiles no encontrados' });
+//     } else {
+//       // Si se encuentran perfiles, obtén sus datos
+//       const profiles = [];
+//       querySnapshot.forEach((doc) => {
+//         profiles.push(doc.data());
+//       });
+
+//       res.json(profiles);
+//     }
+//   } catch (error) {
+//     console.error(
+//       'Error al buscar perfiles por correo electrónico parcial:',
+//       error
+//     );
+//     res.status(500).json({
+//       error: 'Error al buscar perfiles por correo electrónico parcial',
+//     });
+//   }
+// };
 
 // Asociar la función de carga de archivos con una ruta existente
 
