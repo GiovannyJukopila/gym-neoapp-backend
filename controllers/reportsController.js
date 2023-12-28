@@ -623,14 +623,6 @@ const generateDailyReport = async (req, res) => {
         'Net Revenue',
         'Payment Type',
       ],
-      Unfreeze: [
-        'Unfreeze Date',
-        'Full Name',
-        'Card No',
-        'Membership Type',
-        'Net Revenue',
-        'Payment Type',
-      ],
       Freeze: [
         'Freeze Date',
         'Full Name',
@@ -639,38 +631,57 @@ const generateDailyReport = async (req, res) => {
         'Net Revenue',
         'Payment Type',
       ],
+      Unfreeze: [
+        'Unfreeze Date',
+        'Full Name',
+        'Card No',
+        'Membership Type',
+        'Net Revenue',
+        'Payment Type',
+      ],
     };
 
-    for (const paymentType of ['Renew', 'New', 'Unfreeze', 'Freeze']) {
+    function generateTable(paymentType, tableData, tableHeaders) {
+      const table = {
+        title: `${paymentType} Payments Details`,
+        headers: tableHeaders.map((header) => ({
+          label: header,
+          property: header.toLowerCase(),
+          width: 80,
+          renderer: null,
+        })),
+        rows: tableData.map((data) => data.map((cell) => String(cell))),
+      };
+
+      // Generar la tabla en el documento PDF
+      doc.text(table.title, { align: 'center' }).moveDown(0.5);
+      doc.table(table, {
+        prepareHeader: () => doc.font('Helvetica-Bold').fontSize(10),
+        prepareRow: (row, indexColumn, indexRow, rectRow, rectCell) => {
+          doc.font('Helvetica').fontSize(10);
+          // ... lógica para preparar las filas
+        },
+        borderHorizontalWidths: (i) => 0.8,
+        borderVerticalWidths: (i) => 0.8,
+        borderColor: (i) => (i === -1 ? 'black' : 'gray'),
+        padding: 10,
+        margins: { top: 50, bottom: 50, left: 50, right: 50 },
+      });
+    }
+
+    // Recorre los tipos de pago y genera tablas
+    for (const paymentType of ['Renew', 'New', 'Freeze', 'Unfreeze']) {
       if (Object.hasOwnProperty.call(tablesByPaymentType, paymentType)) {
         const tableData = tablesByPaymentType[paymentType];
         if (tableData.length > 0) {
           const tableHeaders = headersByPaymentType[paymentType];
-          // Crear una tabla por tipo de pago
-          const table = {
-            title: `${paymentType} Payments Details`,
-            headers: tableHeaders.map((header) => ({
-              label: header,
-              property: header.toLowerCase(),
-              width: 80,
-              renderer: null,
-            })),
-            rows: tableData.map((data) => data.map((cell) => String(cell))),
-          };
 
-          // Generar la tabla en el documento PDF
-          doc.table(table, {
-            prepareHeader: () => doc.font('Helvetica-Bold').fontSize(10),
-            prepareRow: (row, indexColumn, indexRow, rectRow, rectCell) => {
-              doc.font('Helvetica').fontSize(10);
-              // ... lógica para preparar las filas
-            },
-            borderHorizontalWidths: (i) => 0.8,
-            borderVerticalWidths: (i) => 0.8,
-            borderColor: (i) => (i === -1 ? 'black' : 'gray'),
-            padding: 10,
-            margins: { top: 50, bottom: 50, left: 50, right: 50 },
-          });
+          // Verificar si hay suficiente espacio en la página actual
+          if (doc.y + 200 > doc.page.height) {
+            doc.addPage(); // Agregar una nueva página si no hay suficiente espacio
+          }
+
+          generateTable(paymentType, tableData, tableHeaders);
         }
       }
     }
