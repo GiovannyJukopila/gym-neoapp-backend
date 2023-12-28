@@ -796,7 +796,9 @@ const updateProfileEndDate = async (req, res) => {
 
 const searchProfile = async (req, res) => {
   try {
-    const searchTerm = req.query.term; // Obtén el término de búsqueda y elimina espacios adicionales
+    let searchTerm = req.query.term; // Obtén el término de búsqueda y elimina espacios adicionales
+    searchTerm = searchTerm.charAt(0).toUpperCase() + searchTerm.slice(1);
+
     const gymId = req.query.gymId; // Obtén el gymId de la solicitud
 
     let profiles = [];
