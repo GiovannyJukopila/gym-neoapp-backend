@@ -195,7 +195,6 @@ const getNotification = async (req, res) => {
         const memberEmails = await getMemberEmailsByGymId(gymId);
         for (const email of memberEmails) {
           if (isValidEmail(email)) {
-            console.log(email);
             const emailContent = buildCustomEmailContent(
               subject,
               content,
