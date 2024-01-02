@@ -158,17 +158,23 @@ const getNotification = async (req, res) => {
     // Nombre del archivo adjunto
     const imageFileName = 'image.png';
 
+    function isValidEmail(email) {
+      return /\S+@\S+\.\S+/.test(email);
+    }
+
     if (reason === 'setup_password') {
       if (isForAll) {
         const memberEmails = await getMemberEmailsByGymId(gymId);
         for (const email of memberEmails) {
-          const emailContent = buildCustomEmailContent(
-            subject,
-            content,
-            image,
-            reason
-          );
-          await sendCustomEmail(email, subject, emailContent);
+          if (isValidEmail(email)) {
+            const emailContent = buildCustomEmailContent(
+              subject,
+              content,
+              image,
+              reason
+            );
+            await sendCustomEmail(email, subject, emailContent);
+          }
         }
       } else {
         const recipientEmails = recipient
@@ -188,8 +194,15 @@ const getNotification = async (req, res) => {
       if (isForAll) {
         const memberEmails = await getMemberEmailsByGymId(gymId);
         for (const email of memberEmails) {
-          const emailContent = buildCustomEmailContent(subject, content, image);
-          await sendCustomEmail(email, subject, emailContent);
+          if (isValidEmail(email)) {
+            console.log(email);
+            const emailContent = buildCustomEmailContent(
+              subject,
+              content,
+              image
+            );
+            await sendCustomEmail(email, subject, emailContent);
+          }
         }
       } else {
         const recipientEmails = recipient
