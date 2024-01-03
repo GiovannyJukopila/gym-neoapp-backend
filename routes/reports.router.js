@@ -4,11 +4,12 @@ const {
   generateReportByMembership,
   generateDailyReport,
 } = require('../controllers/reportsController');
+const verifyToken = require('../middlewares/authMiddleware');
 
 const router = express.Router();
 
 router.post('/generateGlobalReport', generateGlobalReport);
 router.post('/generateReportByMembership', generateReportByMembership);
-router.get('/generateDailyReport/:gymId', generateDailyReport);
+router.post('/generateDailyReport/:gymId', verifyToken, generateDailyReport);
 
 module.exports = router;

@@ -27,7 +27,7 @@ function buildCustomEmailContent(subject, content, image, reason) {
     : '';
   const button =
     reason === 'setup_password'
-      ? `<a href="http://3.73.37.170/setup-password" class="button">Set Up Password</a>`
+      ? `<a href="https://neoappgym.com/setup-password" class="button">Set Up Password</a>`
       : '';
 
   return `

@@ -348,6 +348,8 @@ const getUtcOffset = (timeZoneStr) => {
 const generateDailyReport = async (req, res) => {
   try {
     const { gymId } = req.params;
+
+    const { selectedDate } = req.body;
     const doc = new PDFDocument();
 
     res.setHeader(
@@ -387,7 +389,7 @@ const generateDailyReport = async (req, res) => {
       .collection('paymentHistory')
       .where('gymId', '==', gymId)
       .where('paymentType', '==', 'new')
-      .where('paymentDate', '>=', dateString)
+      .where('paymentDate', '>=', selectedDate)
       .get();
 
     const totalNewMembers = newMembersQuery.size;
@@ -397,13 +399,13 @@ const generateDailyReport = async (req, res) => {
       .collection('paymentHistory')
       .where('gymId', '==', gymId)
       .where('paymentType', '==', 'renew')
-      .where('paymentDate', '>=', dateString)
+      .where('paymentDate', '>=', selectedDate)
       .get();
 
     const totalRenewedMembers = renewedMembersQuery.size;
 
-    const startOfDay = new Date(`${dateString}T00:00:00`);
-    const endOfDay = new Date(`${dateString}T23:59:59.999`);
+    const startOfDay = new Date(`${selectedDate}T00:00:00`);
+    const endOfDay = new Date(`${selectedDate}T23:59:59.999`);
 
     const todayCheckinsQuery = await admin
       .firestore()
@@ -432,7 +434,7 @@ const generateDailyReport = async (req, res) => {
       .firestore()
       .collection('guests')
       .where('gymId', '==', gymId)
-      .where('currentDate', '==', dateString)
+      .where('currentDate', '==', selectedDate)
       .get();
 
     const totalGuests = guestsQuery.size;
@@ -442,7 +444,7 @@ const generateDailyReport = async (req, res) => {
       .collection('paymentHistory')
       .where('gymId', '==', gymId)
       .where('paymentType', '==', 'Freeze')
-      .where('paymentDate', '==', dateString)
+      .where('paymentDate', '==', selectedDate)
       .get();
 
     let totalFrozen = 0; // Inicializa la variable para evitar errores
@@ -458,7 +460,7 @@ const generateDailyReport = async (req, res) => {
       .collection('paymentHistory')
       .where('gymId', '==', gymId)
       .where('paymentType', '==', 'UnFreeze')
-      .where('paymentDate', '==', dateString)
+      .where('paymentDate', '==', selectedDate)
       .get();
 
     const totalUnfrozen = unFrozenQuery.size;
@@ -467,7 +469,7 @@ const generateDailyReport = async (req, res) => {
       .firestore()
       .collection('paymentHistory')
       .where('gymId', '==', gymId)
-      .where('paymentDate', '==', dateString);
+      .where('paymentDate', '==', selectedDate);
 
     let totalReceive = 0;
     const querySnapshot = await paymentsRef.get();
@@ -564,7 +566,10 @@ const generateDailyReport = async (req, res) => {
 
     // Resto del código después de que todas las promesas se resuelvan
 
-    doc.fontSize(18).text(`SUMMARY  ${dateString}`, { bold: true }).moveDown(1);
+    doc
+      .fontSize(18)
+      .text(`SUMMARY  ${selectedDate}`, { bold: true })
+      .moveDown(1);
 
     //First table
 
