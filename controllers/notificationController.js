@@ -140,7 +140,7 @@ async function sendCustomEmail(recipient, subject, emailContent, image) {
   try {
     const info = await transporter.sendMail({
       from: '"No Reply - NeoApp 👻" <goneoapp@gmail.com>',
-      to: recipient,
+      bcc: recipient,
       subject: subject,
       html: emailContent, // Usar el contenido HTML generado
     });
@@ -165,16 +165,16 @@ const getNotification = async (req, res) => {
     if (reason === 'setup_password') {
       if (isForAll) {
         const memberEmails = await getMemberEmailsByGymId(gymId);
-        for (const email of memberEmails) {
-          if (isValidEmail(email)) {
-            const emailContent = buildCustomEmailContent(
-              subject,
-              content,
-              image,
-              reason
-            );
-            await sendCustomEmail(email, subject, emailContent);
-          }
+        const validEmails = memberEmails.filter(isValidEmail);
+
+        if (validEmails.length > 0) {
+          const emailContent = buildCustomEmailContent(
+            subject,
+            content,
+            image,
+            reason
+          );
+          await sendCustomEmail(validEmails, subject, emailContent);
         }
       } else {
         const recipientEmails = recipient
@@ -193,15 +193,11 @@ const getNotification = async (req, res) => {
     } else if (reason === 'others' || reason === 'promo') {
       if (isForAll) {
         const memberEmails = await getMemberEmailsByGymId(gymId);
-        for (const email of memberEmails) {
-          if (isValidEmail(email)) {
-            const emailContent = buildCustomEmailContent(
-              subject,
-              content,
-              image
-            );
-            await sendCustomEmail(email, subject, emailContent);
-          }
+        const validEmails = memberEmails.filter(isValidEmail);
+
+        if (validEmails.length > 0) {
+          const emailContent = buildCustomEmailContent(subject, content, image);
+          await sendCustomEmail(validEmails, subject, emailContent);
         }
       } else {
         const recipientEmails = recipient
