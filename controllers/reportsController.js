@@ -542,14 +542,6 @@ const generateDailyReport = async (req, res) => {
             paymentType,
           ]);
         } else if (paymentType === 'UnFreeze') {
-          console.log(
-            signUpDate,
-            fullName,
-            cardNo,
-            membershipType,
-            netRevenue,
-            paymentType
-          );
           tablesByPaymentType.Unfreeze.push([
             signUpDate,
             fullName,
@@ -682,7 +674,7 @@ const generateDailyReport = async (req, res) => {
           const tableHeaders = headersByPaymentType[paymentType];
 
           // Verificar si hay suficiente espacio en la página actual
-          if (doc.y + 200 > doc.page.height) {
+          if (doc.y + 300 > doc.page.height) {
             doc.addPage(); // Agregar una nueva página si no hay suficiente espacio
           }
 
