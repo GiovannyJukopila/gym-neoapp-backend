@@ -156,39 +156,39 @@ const getlogIn = async (req, res) => {
       );
 
       if (profileData.profileIsAdmin || profileData.role === 'trainer') {
-        const currentDate = new Date();
-        const passwordCreationDate = new Date(profileData.passwordCreationDate);
-        const daysDifference = Math.floor(
-          (currentDate - passwordCreationDate) / (1000 * 60 * 60 * 24)
-        );
+        // const currentDate = new Date();
+        // const passwordCreationDate = new Date(profileData.passwordCreationDate);
+        // const daysDifference = Math.floor(
+        //   (currentDate - passwordCreationDate) / (1000 * 60 * 60 * 24)
+        // );
 
         // If less than 1 minute has passed and it's an administrator, show an error
-        if (daysDifference > 30) {
-          return res.status(401).json({
-            changepassword: true,
-            error: 'You must change your password before logging in.',
-          });
-        } else {
-          const verificationCode = generateVerificationCode();
+        // if (daysDifference > 30) {
+        //   return res.status(401).json({
+        //     changepassword: true,
+        //     error: 'You must change your password before logging in.',
+        //   });
+        // } else {
+        const verificationCode = generateVerificationCode();
 
-          // Envía el código de verificación por correo electrónico
-          await sendVerificationCodeByEmail(
-            profileData.profileEmail,
-            verificationCode
-          );
+        // Envía el código de verificación por correo electrónico
+        await sendVerificationCodeByEmail(
+          profileData.profileEmail,
+          verificationCode
+        );
 
-          // Guarda el código de verificación en Firestore (o en tu base de datos)
-          await saveVerificationCodeInFirestore(
-            profileData.profileEmail,
-            verificationCode
-          );
-          // 'profileUsername' exists
-          res.status(200).json({
-            email: profileData.profileEmail,
-            profileIsAdmin: profileData.profileIsAdmin,
-            profileIsTrainer: profileData.role,
-          });
-        }
+        // Guarda el código de verificación en Firestore (o en tu base de datos)
+        await saveVerificationCodeInFirestore(
+          profileData.profileEmail,
+          verificationCode
+        );
+        // 'profileUsername' exists
+        res.status(200).json({
+          email: profileData.profileEmail,
+          profileIsAdmin: profileData.profileIsAdmin,
+          profileIsTrainer: profileData.role,
+        });
+        //}
       } else {
         const responseData = {
           message: 'Autenticación exitosa',

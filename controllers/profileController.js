@@ -105,8 +105,11 @@ const createProfile = async (req, res) => {
       // Crear el string de la fecha en el formato 'YYYY-MM-DD'
       const formattedDate = `${year}-${month}-${day}`;
       const paymentHistoryRef = db.collection('paymentHistory');
+      const newPaymentHistoryDoc = paymentHistoryRef.doc();
+      const paymentId = newPaymentHistoryDoc.id;
       // Crear un documento en la colección paymentHistory con el paymentAmount
       const paymentHistoryData = {
+        paymentId: paymentId,
         profileId: newProfileId,
         membershipId: req.body.membershipId,
         gymId: req.body.gymId,
@@ -118,7 +121,7 @@ const createProfile = async (req, res) => {
         // ... (otros datos relacionados con el pago o historial)
       };
 
-      await paymentHistoryRef.doc().set(paymentHistoryData);
+      await paymentHistoryRef.doc(paymentId).set(paymentHistoryData);
 
       // Responde con éxito
       res
@@ -552,8 +555,11 @@ const freezeMembership = async (req, res) => {
       });
 
     const paymentHistoryRef = db.collection('paymentHistory');
+    const newPaymentHistoryDoc = paymentHistoryRef.doc();
+    const paymentId = newPaymentHistoryDoc.id;
     // Crear un documento en la colección paymentHistory con el paymentAmount
     const paymentHistoryData = {
+      paymentId: paymentId,
       profileId: profileId,
       gymId: gymId,
       paymentDate: new Date().toISOString().slice(0, 10),
@@ -564,7 +570,7 @@ const freezeMembership = async (req, res) => {
       // ... (otros datos relacionados con el pago o historial)
     };
 
-    await paymentHistoryRef.doc().set(paymentHistoryData);
+    await paymentHistoryRef.doc(paymentId).set(paymentHistoryData);
 
     // Responde con éxito
     res.status(200).json({ message: 'Membership frozen successfully' });
@@ -606,8 +612,11 @@ const unfreezeMembership = async (req, res) => {
     });
 
     const paymentHistoryRef = db.collection('paymentHistory');
+    const newPaymentHistoryDoc = paymentHistoryRef.doc();
+    const paymentId = newPaymentHistoryDoc.id;
     // Crear un documento en la colección paymentHistory con el paymentAmount
     const paymentHistoryData = {
+      paymentId: paymentId,
       profileId: profileId,
       gymId: gymId,
       paymentStartDate: profileUnfreezeStartDate,
@@ -620,7 +629,7 @@ const unfreezeMembership = async (req, res) => {
       // ... (otros datos relacionados con el pago o historial)
     };
 
-    await paymentHistoryRef.doc().set(paymentHistoryData);
+    await paymentHistoryRef.doc(paymentId).set(paymentHistoryData);
 
     // Responde con éxito
     res.status(200).json({ message: 'Membership unfrozen successfully' });
@@ -769,8 +778,11 @@ const updateProfileEndDate = async (req, res) => {
     // await profileRef.update(renewUpdatedInProfileCollection);
 
     const paymentHistoryRef = db.collection('paymentHistory');
+    const newPaymentHistoryDoc = paymentHistoryRef.doc();
+    const paymentId = newPaymentHistoryDoc.id;
     // Crear un documento en la colección paymentHistory con el paymentAmount
     const paymentHistoryData = {
+      paymentId: paymentId,
       profileId: profileId,
       membershipId: profilReneweData.currentSubscription.value,
       gymId: gymId,
@@ -783,7 +795,7 @@ const updateProfileEndDate = async (req, res) => {
       // ... (otros datos relacionados con el pago o historial)
     };
 
-    await paymentHistoryRef.doc().set(paymentHistoryData);
+    await paymentHistoryRef.doc(paymentId).set(paymentHistoryData);
 
     return res.status(200).json({
       message: 'Profile updated, and object added to the queue successfully',
