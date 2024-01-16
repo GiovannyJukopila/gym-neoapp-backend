@@ -174,7 +174,12 @@ const getNotification = async (req, res) => {
             image,
             reason
           );
-          await sendCustomEmail(validEmails, subject, emailContent);
+
+          // Dividir la lista de correos en lotes de 100
+          for (let i = 0; i < validEmails.length; i += 100) {
+            const batchEmails = validEmails.slice(i, i + 100);
+            await sendCustomEmail(batchEmails, subject, emailContent);
+          }
         }
       } else {
         const recipientEmails = recipient
@@ -197,7 +202,12 @@ const getNotification = async (req, res) => {
 
         if (validEmails.length > 0) {
           const emailContent = buildCustomEmailContent(subject, content, image);
-          await sendCustomEmail(validEmails, subject, emailContent);
+
+          // Dividir la lista de correos en lotes de 100
+          for (let i = 0; i < validEmails.length; i += 100) {
+            const batchEmails = validEmails.slice(i, i + 100);
+            await sendCustomEmail(batchEmails, subject, emailContent);
+          }
         }
       } else {
         const recipientEmails = recipient
