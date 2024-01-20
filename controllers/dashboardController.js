@@ -70,51 +70,112 @@ const getTotalMembers = async (req, res) => {
   }
 };
 
-const getCurrentMembersByMemberships = async (req, res) => {
-  try {
-    const { gymId } = req.params;
-    const profilesRef = db.collection('paymentHistory');
-    const snapshot = await profilesRef.where('gymId', '==', gymId).get();
+// const getCurrentMembersByMemberships = async (req, res) => {
+//   try {
+//     const { gymId } = req.params;
+//     const profilesRef = db.collection('paymentHistory');
+//     const snapshot = await profilesRef.where('gymId', '==', gymId).get();
 
-    const userCountsByMembership = {};
-    const membershipMap = {};
+//     const gymSnapshot = await admin
+//       .firestore()
+//       .collection('gyms')
+//       .doc(gymId)
+//       .get();
+//     const gymData = gymSnapshot.data();
+//     const gymTimeZone = gymData.gymTimeZone;
+//     const utcOffset = getUtcOffset(gymTimeZone);
 
-    // Obtener el mapeo de membershipId a planName
-    const membershipsSnapshot = await db
-      .collection('memberships')
-      .where('gymId', '==', gymId)
-      .get();
-    membershipsSnapshot.forEach((membershipDoc) => {
-      const membershipData = membershipDoc.data();
-      const membershipId = membershipDoc.id;
-      const planName = membershipData.planName;
-      membershipMap[membershipId] = planName;
+//     const utcDate = new Date();
+//     const localTimeInMilliseconds = utcDate.getTime() - utcOffset * 60 * 1000;
 
-      // Inicializar todos los recuentos a 0
-      userCountsByMembership[planName] = 0;
-    });
+//     const currentDate = new Date(localTimeInMilliseconds);
+//     currentDate.setUTCHours(0, 0, 0, 0);
 
-    snapshot.forEach((doc) => {
-      const profileData = doc.data();
-      const membershipId = profileData.membershipId;
-      const planName = membershipMap[membershipId];
+//     const dateString = currentDate.toISOString().split('T')[0];
 
-      const startDate = new Date(profileData.paymentStartDate);
-      const endDate = new Date(profileData.paymentEndDate);
+//     const userCountsByMembership = {};
+//     const membershipMap = {};
 
-      // Verificar si el pago intersecta con el mes actual
-      const today = new Date();
-      if (startDate <= today && endDate >= today) {
-        userCountsByMembership[planName]++;
-      }
-    });
+//     // Obtener el mapeo de membershipId a planName
+//     const membershipsSnapshot = await db
+//       .collection('memberships')
+//       .where('gymId', '==', gymId)
+//       .get();
+//     membershipsSnapshot.forEach((membershipDoc) => {
+//       const membershipData = membershipDoc.data();
+//       const membershipId = membershipDoc.id;
+//       const planName = membershipData.planName;
+//       membershipMap[membershipId] = planName;
 
-    res.status(200).json(userCountsByMembership);
-  } catch (error) {
-    console.error('Error fetching profiles:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-};
+//       // Inicializar todos los recuentos a 0
+//       userCountsByMembership[planName] = 0;
+//     });
+
+//     const profilesCollection = db.collection('profiles');
+//     const promises = [];
+
+//     snapshot.forEach(async (doc) => {
+//       try {
+//         const profileData = doc.data();
+//         const profileId = profileData.profileId;
+//         const membershipId = profileData.membershipId;
+//         const planName = membershipMap[membershipId];
+
+//         // Verificar si planName es undefined
+//         if (planName === undefined) {
+//           console.warn(
+//             `No se encontró un planName para el membershipId: ${membershipId}`
+//           );
+//           return; // Salir del bucle para este documento si no hay planName
+//         }
+
+//         const startDate = profileData.paymentStartDate;
+//         const endDate = profileData.paymentEndDate;
+
+//         const promise = profilesCollection
+//           .doc(profileId)
+//           .get()
+//           .then((profileDoc) => {
+//             if (profileDoc.exists) {
+//               const profileStatus = profileDoc.data().profileStatus;
+
+//               // Verificar si profileStatus es true y el pago intersecta con el mes actual
+//               if (
+//                 profileStatus === true &&
+//                 startDate <= dateString &&
+//                 endDate >= dateString
+//               ) {
+//                 userCountsByMembership[planName] =
+//                   (userCountsByMembership[planName] || 0) + 1;
+//               }
+//             } else {
+//               console.warn(
+//                 `El documento del perfil con ID ${profileId} no existe`
+//               );
+//             }
+//           })
+//           .catch((error) => {
+//             console.error(
+//               `Error procesando el perfil con ID ${profileId}:`,
+//               error
+//             );
+//           });
+
+//         promises.push(promise);
+//       } catch (error) {
+//         console.error('Error procesando perfiles:', error);
+//       }
+//     });
+
+//     // Esperar a que todas las promesas se resuelvan antes de enviar la respuesta
+//     await Promise.all(promises);
+
+//     res.status(200).json(userCountsByMembership);
+//   } catch (error) {
+//     console.error('Error fetching profiles:', error);
+//     res.status(500).json({ error: 'Internal server error' });
+//   }
+// };
 
 const getUtcOffset = (timeZoneStr) => {
   const sign = timeZoneStr.includes('-') ? -1 : 1;
@@ -150,6 +211,7 @@ const getCheckInReport = async (req, res) => {
     const todayCheckinsQuery = await admin
       .firestore()
       .collection('accessHistory')
+      .where('gymId', '==', gymId)
       .where('action', '==', 'check-in')
       .where('timestamp', '>=', startOfDay)
       .where('timestamp', '<=', endOfDay)
@@ -157,32 +219,27 @@ const getCheckInReport = async (req, res) => {
 
     let totalCheckInsToday = 0;
 
+    let totalCheckOutsToday = 0;
+
     if (!todayCheckinsQuery.empty) {
       totalCheckInsToday = todayCheckinsQuery.size;
     }
 
-    const sevenDaysAgo = new Date(
-      currentDate.getTime() - 7 * 24 * 60 * 60 * 1000
-    );
-
-    const snapshot = await checkInRef
+    const todayCheckOutsQuery = await admin
+      .firestore()
+      .collection('accessHistory')
       .where('gymId', '==', gymId)
-      .where('action', '==', 'check-in')
-      .where('timestamp', '>=', sevenDaysAgo)
+      .where('action', '==', 'check-out')
+      .where('timestamp', '>=', startOfDay)
+      .where('timestamp', '<=', endOfDay)
       .get();
 
-    let totalCheckInsLastSevenDays = 0;
-
-    snapshot.forEach((doc) => {
-      const timestamp = doc.data().timestamp;
-
-      if (timestamp >= sevenDaysAgo) {
-        totalCheckInsLastSevenDays++;
-      }
-    });
+    if (!todayCheckOutsQuery.empty) {
+      totalCheckOutsToday = todayCheckOutsQuery.size;
+    }
 
     const responseData = {
-      totalCheckInsLastSevenDays,
+      totalCheckOutsToday,
       totalCheckInsToday, // Corregido el nombre de la variable aquí
     };
 
@@ -328,10 +385,203 @@ const getGuestReport = async (req, res) => {
   }
 };
 
+const getCurrentMembersByMemberships = async (req, res) => {
+  try {
+    const { gymId } = req.params;
+    const profilesRef = db.collection('paymentHistory');
+    const snapshot = await profilesRef.where('gymId', '==', gymId).get();
+
+    const gymSnapshot = await admin
+      .firestore()
+      .collection('gyms')
+      .doc(gymId)
+      .get();
+    const gymData = gymSnapshot.data();
+    const gymTimeZone = gymData.gymTimeZone;
+    const utcOffset = getUtcOffset(gymTimeZone);
+
+    const utcDate = new Date();
+    const localTimeInMilliseconds = utcDate.getTime() - utcOffset * 60 * 1000;
+
+    const currentDate = new Date(localTimeInMilliseconds);
+    currentDate.setUTCHours(0, 0, 0, 0);
+
+    const dateString = currentDate.toISOString().split('T')[0];
+
+    const membershipTotals = {};
+
+    // Obtener el mapeo de membershipId a planName
+    const membershipsSnapshot = await db
+      .collection('memberships')
+      .where('gymId', '==', gymId)
+      .get();
+    membershipsSnapshot.forEach((membershipDoc) => {
+      const membershipData = membershipDoc.data();
+      const membershipId = membershipDoc.id;
+      membershipTotals[membershipId] = 0; // Inicializar total de miembros para cada membresía
+    });
+
+    const profilesCollection = db.collection('profiles');
+    const promises = [];
+
+    snapshot.forEach(async (doc) => {
+      try {
+        const profileData = doc.data();
+        const profileId = profileData.profileId;
+        const membershipId = profileData.membershipId;
+
+        // Verificar si membershipId es undefined
+        if (membershipTotals[membershipId] === undefined) {
+          console.warn(
+            `No se encontró un membershipId válido: ${membershipId}`
+          );
+          return; // Salir del bucle para este documento si no hay membershipId válido
+        }
+
+        const startDate = profileData.paymentStartDate;
+        const endDate = profileData.paymentEndDate;
+
+        const promise = profilesCollection
+          .doc(profileId)
+          .get()
+          .then((profileDoc) => {
+            if (profileDoc.exists) {
+              const profileStatus = profileDoc.data().profileStatus;
+
+              // Verificar si profileStatus es true y el pago intersecta con el mes actual
+              if (
+                profileStatus === true &&
+                startDate <= dateString &&
+                endDate >= dateString
+              ) {
+                membershipTotals[membershipId]++; // Incrementar total de miembros para la membresía actual
+              }
+            } else {
+              console.warn(
+                `El documento del perfil con ID ${profileId} no existe`
+              );
+            }
+          })
+          .catch((error) => {
+            console.error(
+              `Error procesando el perfil con ID ${profileId}:`,
+              error
+            );
+          });
+
+        promises.push(promise);
+      } catch (error) {
+        console.error('Error procesando perfiles:', error);
+      }
+    });
+    await Promise.all(promises);
+
+    const membershipsToUpdate = [];
+
+    membershipsSnapshot.forEach((membershipDoc) => {
+      const membershipData = membershipDoc.data();
+      const membershipId = membershipDoc.id;
+
+      if (membershipTotals[membershipId] !== undefined) {
+        membershipsToUpdate.push({
+          id: membershipId,
+          data: {
+            currentTotalMembers: membershipTotals[membershipId],
+          },
+        });
+      } else {
+        console.warn(`No se encontró un total válido para ${membershipId}`);
+      }
+    });
+
+    const updatePromises = membershipsToUpdate.map(async (membership) => {
+      await db
+        .collection('memberships')
+        .doc(membership.id)
+        .update(membership.data);
+    });
+
+    await Promise.all(updatePromises);
+
+    const updatedMembershipTotals = membershipsToUpdate.map((membership) => ({
+      membershipId: membership.id,
+      currentTotalMembers: membership.data.currentTotalMembers,
+    }));
+
+    res.status(200).json(updatedMembershipTotals);
+  } catch (error) {
+    console.error('Error fetching profiles:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+const setInactiveMembers = async (req, res) => {
+  try {
+    const { gymId } = req.params;
+    const gymSnapshot = await admin
+      .firestore()
+      .collection('gyms')
+      .doc(gymId)
+      .get();
+    const gymData = gymSnapshot.data();
+    const gymTimeZone = gymData.gymTimeZone;
+    const utcOffset = getUtcOffset(gymTimeZone);
+
+    const utcDate = new Date();
+    const localTimeInMilliseconds = utcDate.getTime() - utcOffset * 60 * 1000;
+
+    const currentDate = new Date(localTimeInMilliseconds);
+    currentDate.setUTCHours(0, 0, 0, 0);
+
+    const dateString = currentDate.toISOString().split('T')[0];
+
+    // Obtener los perfiles en la colección de perfiles para el gimnasio específico
+    const profilesSnapshot = await admin
+      .firestore()
+      .collection('profiles')
+      .where('gymId', '==', gymId)
+      .where('role', '==', 'member')
+      .get();
+
+    const batch = admin.firestore().batch();
+    profilesSnapshot.forEach((doc) => {
+      const profileData = doc.data();
+      const profileEndDate = profileData.profileEndDate; // asumiendo que profileEndDate es una cadena
+      const renewEndDate =
+        profileData.renewMembershipInQueue?.profileRenewEndDate; // asumiendo que renewMembershipInQueue es un objeto opcional
+      const profileRef = admin.firestore().collection('profiles').doc(doc.id);
+      // Verificar si renewMembershipInQueue existe y renewIsInQueue es falso
+      let profileStatus = false;
+
+      if (
+        profileData.renewMembershipInQueue &&
+        profileData.renewMembershipInQueue.renewIsInQueue
+      ) {
+        profileStatus =
+          profileData.renewMembershipInQueue.profileRenewEndDate > dateString;
+      } else {
+        profileStatus = profileEndDate >= dateString;
+      }
+
+      // Actualizar el estado del perfil en el lote
+      batch.update(profileRef, { profileStatus });
+    });
+
+    // Ejecutar la actualización en lote
+    await batch.commit();
+
+    res.status(200).json({ message: 'Actualización exitosa' });
+  } catch (error) {
+    console.error('Error al actualizar perfiles:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+};
+
 module.exports = {
   getTotalMembers,
   getCurrentMembersByMemberships,
   getCheckInReport,
   getPaymentReport,
   getGuestReport,
+  setInactiveMembers,
 };

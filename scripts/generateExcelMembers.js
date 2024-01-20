@@ -25,7 +25,9 @@ profilesRef
       { header: 'Profile Lastname', key: 'profileLastname' },
       { header: 'Card Serial Number', key: 'cardSerialNumber' },
       { header: 'Membership ID', key: 'membershipId' },
+      { header: 'Start Date', key: 'profileStartDate' },
       { header: 'Expiration Date', key: 'profileEndDate' },
+      { header: 'Profile Status', key: 'profileStatus' },
     ];
 
     // Llena el archivo Excel con los datos filtrados
@@ -36,7 +38,9 @@ profilesRef
         profileLastname: profile.profileLastname || '',
         cardSerialNumber: profile.cardSerialNumber || '',
         membershipId: profile.membershipId || '',
+        profileStartDate: profile.profileStartDate || '',
         profileEndDate: profile.profileEndDate || '',
+        profileStatus: profile.profileStatus || '',
       });
     });
 

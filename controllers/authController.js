@@ -531,7 +531,7 @@ const validateCode = async (req, res) => {
         } else {
           // Código incorrecto
           res
-            .status(200)
+            .status(401)
             .json({ successCode: false, message: 'Invalid verification code' });
         }
       } else {
@@ -544,7 +544,7 @@ const validateCode = async (req, res) => {
     } else {
       // No se encontró un código asociado a ese correo electrónico
       res
-        .status(200)
+        .status(401)
         .json({ successCode: false, message: 'Verification code not found' });
     }
   } catch (error) {

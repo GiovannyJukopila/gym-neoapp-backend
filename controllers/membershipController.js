@@ -4,6 +4,13 @@ const { db } = require('../firebase');
 const bodyParser = require('body-parser');
 const admin = require('firebase-admin');
 app.use(bodyParser.json());
+const {
+  format,
+  startOfMonth,
+  endOfMonth,
+  addMonths,
+  isWithinInterval,
+} = require('date-fns');
 
 const getAllMemberships = async (req, res) => {
   try {
@@ -38,6 +45,7 @@ const getAllMemberships = async (req, res) => {
         startTimeOffPeak: data.startTimeOffPeak,
         endTimeOffPeak: data.endTimeOffPeak,
         selectedWeekDays: data.selectedWeekDays,
+        currentTotalMembers: data.currentTotalMembers,
       };
       membershipsArray.push(membership);
     });
@@ -59,45 +67,6 @@ const getMembership = async (req, res) => {
     res.send(error);
   }
 };
-
-// const getUsersByMonthForMembership = async (req, res) => {
-//   try {
-//     const { membershipId } = req.params;
-//     const profilesRef = db.collection('paymentHistory');
-//     const snapshot = await profilesRef
-//       .where('membershipId', '==', membershipId)
-//       .get();
-
-//     const userCountsByMonth = {};
-
-//     snapshot.forEach((doc) => {
-//       const profileData = doc.data();
-//       const startDate = new Date(profileData.paymentStartDate);
-
-//       // Verifica si startDate es una fecha válida
-//       if (!isNaN(startDate.getTime())) {
-//         const monthYearKey = `${startDate.getFullYear()}-${
-//           startDate.getMonth() + 1
-//         }`;
-//         if (!userCountsByMonth[monthYearKey]) {
-//           userCountsByMonth[monthYearKey] = 0;
-//         }
-//         userCountsByMonth[monthYearKey]++;
-//       } else {
-//         console.error(
-//           'Invalid date format for profileStartDate:',
-//           profileData.paymentStartDate
-//         );
-//         // Opcional: Si deseas registrar que ha habido una fecha inválida en el log
-//       }
-//     });
-
-//     res.status(200).json(userCountsByMonth);
-//   } catch (error) {
-//     console.error('Error fetching profiles:', error);
-//     res.status(500).json({ error: 'Internal server error' });
-//   }
-// };
 
 const getUsersByMonthForMembership = async (req, res) => {
   try {
@@ -137,33 +106,120 @@ const getUsersByMonthForMembership = async (req, res) => {
   }
 };
 
+// const getTotalUsersByMonth = async (req, res) => {
+//   try {
+//     const { gymId } = req.params;
+//     const paymentHistoryRef = db.collection('paymentHistory');
+//     const snapshot = await paymentHistoryRef.where('gymId', '==', gymId).get();
+
+//     const userCountsByMonth = {};
+//     const currentYear = new Date().getFullYear();
+
+//     snapshot.forEach((doc) => {
+//       const profileData = doc.data();
+//       const startDate = new Date(profileData.paymentStartDate);
+//       const endDate = new Date(profileData.paymentEndDate);
+
+//       let currentDate = new Date(startDate); // Inicializa en la fecha de inicio del pago
+
+//       while (currentDate <= endDate) {
+//         // Verifica si la fecha está en el año actual
+//         if (currentDate.getFullYear() === currentYear) {
+//           const monthYearKey = format(currentDate, 'yyyy-MM');
+
+//           if (!userCountsByMonth[monthYearKey]) {
+//             userCountsByMonth[monthYearKey] = 0;
+//           }
+//           userCountsByMonth[monthYearKey]++;
+//         }
+
+//         currentDate = addMonths(currentDate, 1); // Avanza al siguiente mes
+//       }
+//     });
+
+//     res.status(200).json(userCountsByMonth);
+//   } catch (error) {
+//     console.error('Error fetching profiles:', error);
+//     res.status(500).json({ error: 'Internal server error' });
+//   }
+// };
+
 const getTotalUsersByMonth = async (req, res) => {
+  try {
+    const { gymId } = req.params;
+
+    // Obtener una referencia a la colección 'gyms'
+    const gymsRef = admin.firestore().collection('gyms');
+
+    // Obtener el documento correspondiente al 'gymId'
+    const gymDoc = await gymsRef.doc(gymId).get();
+
+    if (!gymDoc.exists) {
+      // El gimnasio con el 'gymId' no fue encontrado
+      return res.status(404).json({ error: 'Gym not found' });
+    }
+
+    // Obtener el objeto 'userCountsByMonth' del documento
+    const userCountsByMonth = gymDoc.data().userCountsByMonth;
+
+    // Devolver el objeto como respuesta
+    res.status(200).json(userCountsByMonth);
+  } catch (error) {
+    console.error('Error updating total users by month:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+const updateTotalUsersByMonth = async (req, res) => {
   try {
     const { gymId } = req.params;
     const paymentHistoryRef = db.collection('paymentHistory');
     const snapshot = await paymentHistoryRef.where('gymId', '==', gymId).get();
 
     const userCountsByMonth = {};
+    const currentYear = new Date().getFullYear();
+    const gymRef = db.collection('gyms').doc(gymId);
+    // Array para almacenar promesas de consultas de perfiles
+    const profilePromises = [];
 
     snapshot.forEach((doc) => {
       const profileData = doc.data();
       const startDate = new Date(profileData.paymentStartDate);
+      const memberId = profileData.profileId;
       const endDate = new Date(profileData.paymentEndDate);
-
       let currentDate = new Date(startDate); // Inicializa en la fecha de inicio del pago
 
+      // Agregar la promesa de consulta del perfil al array
+      const profilePromise = db.collection('profiles').doc(memberId).get();
+      profilePromises.push(profilePromise);
+
       while (currentDate <= endDate) {
-        const monthYearKey = `${currentDate.getFullYear()}-${
-          currentDate.getMonth() + 1
-        }`;
+        // Verifica si la fecha está en el año actual
+        if (currentDate.getFullYear() === currentYear) {
+          const monthYearKey = format(currentDate, 'yyyy-MM');
 
-        if (!userCountsByMonth[monthYearKey]) {
-          userCountsByMonth[monthYearKey] = 0;
+          if (!userCountsByMonth[monthYearKey]) {
+            userCountsByMonth[monthYearKey] = 0;
+          }
+
+          // Actualiza el contador solo si el perfil es 'active'
+          profilePromise.then((profileSnapshot) => {
+            const profileStatus = profileSnapshot.data()?.profileStatus;
+            if (profileStatus === true) {
+              userCountsByMonth[monthYearKey]++;
+            }
+          });
         }
-        userCountsByMonth[monthYearKey]++;
 
-        currentDate.setMonth(currentDate.getMonth() + 1); // Avanza al siguiente mes
+        currentDate = addMonths(currentDate, 1); // Avanza al siguiente mes
       }
+    });
+
+    // Espera a que todas las promesas de consulta del perfil se resuelvan antes de enviar la respuesta
+    await Promise.all(profilePromises);
+
+    await gymRef.update({
+      userCountsByMonth: userCountsByMonth,
     });
 
     res.status(200).json(userCountsByMonth);
@@ -173,64 +229,6 @@ const getTotalUsersByMonth = async (req, res) => {
   }
 };
 
-// const createMembership = async (req, res) => {
-//   try {
-//     const gymId = req.query.gymId; // Obtener gymId de los parámetros
-//     const body = req.body;
-
-//     // Genera el nombre del documento
-//     // const metadataRef = admin.firestore().collection('metadata').doc(gymId);
-//     // const metadataDoc = await metadataRef.get();
-//     // let membershipCounter = 1;
-
-//     // if (metadataDoc.exists) {
-//     //   const data = metadataDoc.data();
-//     //   membershipCounter = data.membershipCounter + 1;
-//     // }
-
-//     // Actualiza el contador de membresía en la colección "metadata"
-//     // await metadataRef.set({ membershipCounter });
-
-//     const documentName = `${gymId}-membership-${membershipCounter}`;
-
-//     const MembershipCollection = db
-//       .collection('memberships')
-//       .doc(documentName)
-//       .set(body);
-
-//     res.status(201).json({
-//       message: 'Membership created',
-//       documentName,
-//     });
-//   } catch (error) {
-//     console.error('Error creating membership:', error);
-//     res.status(500).json({
-//       message: 'An error occurred while creating the membership',
-//     });
-//   }
-// };
-
-// const createMembership = async (req, res) => {
-//   try {
-//     const body = req.body;
-
-//     // Assuming you want to generate a new document ID for each profile
-//     const membershipCollection = db.collection('memberships');
-//     const newProfileRef = membershipCollection.doc(); // Automatically generates a new document ID
-
-//     await newProfileRef.set(body);
-
-//     res.status(201).json({
-//       message: 'Profile created',
-//       membership: newProfileRef.id, // Return the newly generated profile ID
-//     });
-//   } catch (error) {
-//     console.error('Error creating profile:', error);
-//     res.status(500).json({
-//       message: 'An error occurred while creating the profile',
-//     });
-//   }
-// };
 const createMembership = async (req, res) => {
   try {
     const body = req.body;
@@ -241,6 +239,7 @@ const createMembership = async (req, res) => {
     // Genera el nombre del documento
     const documentName = `membership-${gymId}-${membershipSerialNumber}`;
     body.membershipId = documentName;
+    body.currentTotalMembers = 0;
 
     // Crea el nuevo documento en la colección "memberships" en Firebase
     const profilesCollection = db.collection('memberships');
@@ -348,6 +347,7 @@ module.exports = {
   getMembership,
   getUsersByMonthForMembership,
   getTotalUsersByMonth,
+  updateTotalUsersByMonth,
   createMembership,
   updateMembership,
   deleteMembership,

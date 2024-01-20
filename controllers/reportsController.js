@@ -345,6 +345,110 @@ const getUtcOffset = (timeZoneStr) => {
   return parseInt(offsetStr, 10) * sign;
 };
 
+const generateExpirationReport = async (req, res) => {
+  try {
+    const { gymId } = req.params;
+    const { selectedDays } = req.body;
+
+    // Consulta a Firestore para obtener perfiles que cumplen con los criterios
+    const profilesSnapshot = await admin
+      .firestore()
+      .collection('profiles')
+      .where('gymId', '==', gymId)
+      .where('profileStatus', '==', true)
+      .get();
+
+    // Configurar el encabezado de la respuesta para descargar el PDF
+    res.setHeader(
+      'Content-Disposition',
+      'attachment; filename="expiration_report.pdf"'
+    );
+
+    // Crear un nuevo documento PDF
+    const doc = new PDFDocument();
+    doc.pipe(res);
+
+    // Título del informe
+    doc.rect(0, 0, 612, 80).fill('#FFA500');
+    doc
+      .fontSize(25)
+      .fill('white')
+      .text('EXPIRATION REPORT', 50, 30, { align: 'left', valign: 'center' });
+
+    // Obtener la fecha límite para la expiración (hoy + selectedDays)
+    const currentDate = new Date();
+    const endDate = new Date(
+      currentDate.getTime() + selectedDays * 24 * 60 * 60 * 1000
+    );
+
+    // Tabla para mostrar la información
+    const tableData = [];
+
+    // Iterar sobre los perfiles y agregar la información a la tabla
+    for (const profileDoc of profilesSnapshot.docs) {
+      const profile = profileDoc.data();
+      const {
+        profileName,
+        profileLastname,
+        membershipId,
+        profileEndDate,
+        profileEmail,
+      } = profile;
+
+      // Convertir la cadena 'YYYY-MM-DD' a un objeto Date
+      const endDateAsDate = new Date(profileEndDate);
+
+      // Calcular la diferencia de días
+      const daysDifference = Math.floor(
+        (endDateAsDate - currentDate) / (24 * 60 * 60 * 1000)
+      );
+
+      // Verificar si el perfil está dentro del rango de días seleccionado
+      if (daysDifference <= selectedDays) {
+        // Obtener información del tipo de membresía
+        const membershipSnapshot = await admin
+          .firestore()
+          .collection('memberships')
+          .doc(membershipId)
+          .get();
+        const membership = membershipSnapshot.data();
+
+        // Agregar fila a la tabla
+        tableData.push([
+          profileName + ' ' + profileLastname,
+          membership.planName,
+          profileEndDate,
+          profileEmail,
+        ]);
+      }
+    }
+
+    // Asegurarse de que haya datos antes de crear la tabla
+    if (tableData.length > 0) {
+      const table = {
+        headers: ['Full Name', 'Membership Type', 'Expiration Date', 'Email'],
+        rows: tableData,
+      };
+
+      doc.moveDown().table(table, {
+        x: 100,
+        y: 150,
+        autoSize: true,
+      });
+    } else {
+      doc.text('No data available for the selected criteria.', 100, 150);
+    }
+
+    // Finalizar el informe PDF
+    doc.end();
+  } catch (error) {
+    console.error(error);
+    if (!res.headersSent) {
+      res.status(500).send('Internal Server Error');
+    }
+  }
+};
+
 const generateDailyReport = async (req, res) => {
   try {
     const { gymId } = req.params;
@@ -694,4 +798,5 @@ module.exports = {
   generateGlobalReport,
   generateReportByMembership,
   generateDailyReport,
+  generateExpirationReport,
 };
