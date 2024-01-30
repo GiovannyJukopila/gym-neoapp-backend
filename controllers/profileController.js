@@ -805,6 +805,107 @@ const updateProfileEndDate = async (req, res) => {
     return res.status(500).json({ error: 'Error updating the profile' });
   }
 };
+const getProfileByName = async (req, res) => {
+  try {
+    let partialName = req.body.name; // Obtén el término de búsqueda y elimina espacios adicionales
+    partialName = partialName.charAt(0).toUpperCase() + partialName.slice(1);
+
+    const gymId = req.query.gymId; // Obtén el gymId de la solicitud
+
+    let profiles = [];
+
+    const profilesRef = db.collection('profiles');
+
+    // Verificar si el término de búsqueda contiene un espacio (suponiendo que es nombre y apellido)
+    if (partialName.includes(' ')) {
+      const [firstName, ...lastNameArr] = partialName.split(' ');
+      const lastName = lastNameArr.join(' '); // Si el apellido tiene espacios
+
+      const nameSnapshot = await profilesRef
+        .where('gymId', '==', gymId) // Filtrar por gymId
+        .where('role', '==', 'member')
+        .where('profileName', '==', `${firstName} ${lastName}`)
+        .get();
+
+      nameSnapshot.forEach((doc) => {
+        profiles.push(doc.data());
+      });
+
+      const lastNameSnapshot = await profilesRef
+        .where('gymId', '==', gymId) // Filtrar por gymId
+        .where('role', '==', 'member')
+        .where('profileLastname', '==', lastName)
+        .get();
+
+      lastNameSnapshot.forEach((doc) => {
+        profiles.push(doc.data());
+      });
+    } else {
+      // Si no hay espacio, buscar coincidencias en profileName y profileLastName
+      const snapshot = await profilesRef
+        .where('gymId', '==', gymId) // Filtrar por gymId
+        .where('role', '==', 'member')
+        .where('profileName', '>=', partialName)
+        .where('profileName', '<=', partialName + '\uf8ff')
+        .get();
+
+      snapshot.forEach((doc) => {
+        profiles.push(doc.data());
+      });
+    }
+
+    if (profiles.length === 0) {
+      res.status(404).json({ message: 'Perfiles no encontrados' });
+    } else {
+      res.json(profiles);
+    }
+  } catch (error) {
+    console.error('Error al buscar perfiles por término de búsqueda:', error);
+    res.status(500).json({
+      error: 'Error al buscar perfiles por término de búsqueda',
+    });
+  }
+};
+// const getProfileByName = async (req, res) => {
+//   try {
+//     let partialName = req.body.name; // Obtén el nombre parcial de la solicitud
+//     partialName = partialName.charAt(0).toUpperCase() + partialName.slice(1);
+//     const gymId = req.query.gymId; // Obtén el gymId de la solicitud
+
+//     // Validar la entrada del usuario
+//     if (!partialName || !gymId) {
+//       return res.status(400).json({ error: 'Se requiere name y gymId.' });
+//     }
+
+//     // Realizar dos consultas separadas
+//     const querySnapshotName = await db
+//       .collection('profiles')
+//       .where('gymId', '==', gymId)
+//       .where('role', '==', 'member')
+//       .where('profileName', '>=', partialName)
+//       .where('profileName', '<=', partialName + '\uf8ff')
+//       .get();
+
+//     const querySnapshotLastName = await db
+//       .collection('profiles')
+//       .where('gymId', '==', gymId)
+//       .where('role', '==', 'member')
+//       .where('profileLastname', '>=', partialName)
+//       .where('profileLastname', '<=', partialName + '\uf8ff')
+//       .get();
+
+//     // Combina los resultados de ambas consultas
+//     const profiles = [
+//       ...querySnapshotName.docs.map((doc) => doc.data()),
+//       ...querySnapshotLastName.docs.map((doc) => doc.data()),
+//     ];
+
+//     return res.json({ data: profiles });
+//   } catch (error) {
+//     console.error('Error en getProfileByName:', error);
+//     return res.status(500).json({ error: 'Error interno del servidor' });
+//   }
+// };
 
 const searchProfile = async (req, res) => {
   try {
@@ -957,4 +1058,5 @@ module.exports = {
   checkCardForUpdated,
   updateProfileEndDate,
   getProfileByEmail,
+  getProfileByName,
 };

@@ -87,6 +87,15 @@ const getAllClasses = async (req, res) => {
         selectTrainer: data.selectTrainer, // Si planName no está definido, usar una cadena vacía
         startTime: data.startTime,
         endTime: data.endTime,
+        eventDate: data.eventDate,
+        eventColor: data.eventColor,
+        limitCapacity: data.limitCapacity,
+        repeatDaily: data.repeatDaily,
+        weekDays: data.weekDays,
+        expirationDate: data.expirationDate,
+        participants: data?.participants,
+        currentClassParticipants: data?.currentClassParticipants,
+        classesCancelled: data?.classesCancelled,
       };
       classesArray.push(membership);
     });
@@ -174,10 +183,136 @@ const getTrainers = async (req, res) => {
   }
 };
 
+const addParticipants = async (req, res) => {
+  try {
+    const participants = req.body.memberForm; // Extraer la lista de participantes de req.body.memberForm
+    const classId = req.body.classId;
+
+    // Obtén la referencia a la colección de clases
+    const classesCollection = db.collection('classes');
+
+    // Obtén la referencia al documento de la clase por ID
+    const classDocRef = classesCollection.doc(classId);
+
+    // Verifica si la clase existe
+    const classDoc = await classDocRef.get();
+
+    // Si la clase no existe, crea un nuevo documento con el campo participants inicializado en 1
+    if (!classDoc.exists) {
+      await classDocRef.set({
+        participants: participants,
+        currentClassParticipants: 1,
+      });
+
+      return res.status(200).json({
+        message: 'Participantes agregados con éxito',
+        currentClassParticipants: 1,
+      });
+    }
+
+    // Obtiene el campo de participantes actual
+    const currentParticipants = classDoc.data().participants || [];
+
+    // Actualiza el campo de participantes utilizando arrayUnion
+    await classDocRef.update({
+      participants: admin.firestore.FieldValue.arrayUnion(...participants),
+      currentClassParticipants: currentParticipants.length + 1,
+    });
+
+    return res.status(200).json({
+      message: 'Participantes agregados con éxito',
+      currentClassParticipants: currentParticipants.length + 1,
+    });
+  } catch (error) {
+    console.error('Error al agregar participantes:', error);
+    return res.status(500).json({ message: 'Error interno del servidor' });
+  }
+};
+
+const removeParticipant = async (req, res) => {
+  try {
+    const { deletedProfileId, classId } = req.body;
+
+    // Obtén una referencia a la colección de clases
+    const classesCollection = db.collection('classes');
+
+    // Obtén una referencia al documento de la clase por ID
+    const classDocRef = classesCollection.doc(classId);
+
+    // Verifica si la clase existe
+    const classDoc = await classDocRef.get();
+    if (!classDoc.exists) {
+      return res.status(404).json({ message: 'Clase no encontrada' });
+    }
+
+    // Obtén los participantes actuales de la clase
+    const currentParticipants = classDoc.data().participants || [];
+
+    // Filtra los participantes para excluir al participante con deletedProfileId
+    const updatedParticipants = currentParticipants.filter(
+      (participant) => participant.profileId !== deletedProfileId
+    );
+
+    // Actualiza el campo de participantes en el documento de la clase
+    await classDocRef.update({
+      participants: updatedParticipants,
+      currentClassParticipants: updatedParticipants.length,
+    });
+
+    // Obtiene la clase actualizada para contar el número de participantes
+    const updatedClassDoc = await classDocRef.get();
+    const currentClassParticipants = updatedClassDoc.data().participants.length;
+
+    // Devuelve una respuesta exitosa junto con el nuevo número de participantes
+    res.status(200).json({
+      message: 'Participante eliminado con éxito',
+      currentClassParticipants: currentClassParticipants,
+    });
+  } catch (error) {
+    console.error('Error al eliminar participante:', error);
+    res.status(500).json({ message: 'Error interno del servidor' });
+  }
+};
+
+const cancelClass = async (req, res) => {
+  try {
+    const { classId, eventStartDate } = req.body;
+
+    // Obtén una referencia a la colección de clases
+    const classesCollection = db.collection('classes');
+
+    // Obtén una referencia al documento de la clase por ID
+    const classDocRef = classesCollection.doc(classId);
+
+    // Verifica si la clase existe
+    const classDoc = await classDocRef.get();
+    if (!classDoc.exists) {
+      return res.status(404).json({ message: 'Clase no encontrada' });
+    }
+
+    // Obtén el array classesCancelled del documento actual o inicializa en caso de que no exista
+    const classesCancelled = classDoc.data().classesCancelled || [];
+
+    // Agrega el eventStartDate al array classesCancelled
+    classesCancelled.push(eventStartDate);
+
+    // Actualiza el campo classesCancelled en el documento de la clase
+    await classDocRef.update({ classesCancelled: classesCancelled });
+
+    return res.status(200).json({ message: 'Clase cancelada con éxito' });
+  } catch (error) {
+    console.error('Error al cancelar la clase:', error);
+    res.status(500).json({ message: 'Error interno del servidor' });
+  }
+};
+
 module.exports = {
   createClass,
   getAllClasses,
   deleteClass,
   updateClass,
   getTrainers,
+  addParticipants,
+  removeParticipant,
+  cancelClass,
 };

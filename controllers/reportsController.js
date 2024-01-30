@@ -413,7 +413,6 @@ const generateExpirationReport = async (req, res) => {
           .get();
         const membership = membershipSnapshot.data();
 
-        // Agregar fila a la tabla
         tableData.push([
           profileName + ' ' + profileLastname,
           membership.planName,
@@ -422,8 +421,6 @@ const generateExpirationReport = async (req, res) => {
         ]);
       }
     }
-
-    // Asegurarse de que haya datos antes de crear la tabla
     if (tableData.length > 0) {
       const table = {
         headers: ['Full Name', 'Membership Type', 'Expiration Date', 'Email'],
@@ -439,7 +436,6 @@ const generateExpirationReport = async (req, res) => {
       doc.text('No data available for the selected criteria.', 100, 150);
     }
 
-    // Finalizar el informe PDF
     doc.end();
   } catch (error) {
     console.error(error);

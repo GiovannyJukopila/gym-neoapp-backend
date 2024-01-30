@@ -13,6 +13,7 @@ const {
   checkCardForUpdated,
   updateProfileEndDate,
   deleteFile,
+  getProfileByName,
 } = require('../controllers/profileController');
 const multer = require('multer');
 
@@ -28,6 +29,8 @@ router.get('/get/all', getAllProfiles);
 router.get('/get/:id', getProfile);
 
 router.get('/search', searchProfile);
+
+router.post('/get/getProfileByName', getProfileByName);
 
 router.post('/get/profileByEmail', getProfileByEmail);
 
