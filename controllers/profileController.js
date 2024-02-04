@@ -907,24 +907,59 @@ const getProfileByName = async (req, res) => {
 //   }
 // };
 
+const searchByCardNumber = async (req, res) => {
+  try {
+    let searchTerm = req.query.term; // Obtén el término de búsqueda y elimina espacios adicionales
+    searchTerm = searchTerm.trim().toUpperCase(); // Convierte a mayúsculas y elimina espacios al principio y al final
+
+    const gymId = req.query.gymId; // Obtén el gymId de la solicitud
+
+    const profilesRef = db.collection('profiles');
+
+    const snapshot = await profilesRef
+      .where('gymId', '==', gymId) // Filtrar por gymId
+      .where('role', '==', 'member')
+      .where('cardSerialNumber', '==', searchTerm) // Operador de rango// Operador de rango
+      .get();
+
+    const profiles = [];
+
+    snapshot.forEach((doc) => {
+      profiles.push(doc.data());
+    });
+
+    if (profiles.length === 0) {
+      res.status(404).json({ message: 'Perfiles no encontrados' });
+    } else {
+      res.json(profiles);
+    }
+  } catch (error) {
+    console.error('Error al buscar perfiles por número de tarjeta:', error);
+    res.status(500).json({
+      error: 'Error al buscar perfiles por número de tarjeta',
+    });
+  }
+};
+
+module.exports = { searchByCardNumber };
+
 const searchProfile = async (req, res) => {
   try {
     let searchTerm = req.query.term; // Obtén el término de búsqueda y elimina espacios adicionales
     searchTerm = searchTerm.charAt(0).toUpperCase() + searchTerm.slice(1);
 
-    const gymId = req.query.gymId; // Obtén el gymId de la solicitud
+    const gymId = req.query.gymId;
 
     let profiles = [];
 
     const profilesRef = db.collection('profiles');
 
-    // Verificar si el término de búsqueda contiene un espacio (suponiendo que es nombre y apellido)
     if (searchTerm.includes(' ')) {
       const [firstName, ...lastNameArr] = searchTerm.split(' ');
-      const lastName = lastNameArr.join(' '); // Si el apellido tiene espacios
+      const lastName = lastNameArr.join(' ');
 
       const nameSnapshot = await profilesRef
-        .where('gymId', '==', gymId) // Filtrar por gymId
+        .where('gymId', '==', gymId)
         .where('role', '==', 'member')
         .where('profileName', '==', `${firstName} ${lastName}`)
         .get();
@@ -934,7 +969,7 @@ const searchProfile = async (req, res) => {
       });
 
       const lastNameSnapshot = await profilesRef
-        .where('gymId', '==', gymId) // Filtrar por gymId
+        .where('gymId', '==', gymId)
         .where('role', '==', 'member')
         .where('profileLastname', '==', lastName)
         .get();
@@ -943,9 +978,8 @@ const searchProfile = async (req, res) => {
         profiles.push(doc.data());
       });
     } else {
-      // Si no hay espacio, buscar coincidencias en profileName y profileLastName
       const snapshot = await profilesRef
-        .where('gymId', '==', gymId) // Filtrar por gymId
+        .where('gymId', '==', gymId)
         .where('role', '==', 'member')
         .where('profileName', '>=', searchTerm)
         .where('profileName', '<=', searchTerm + '\uf8ff')
@@ -1059,4 +1093,5 @@ module.exports = {
   updateProfileEndDate,
   getProfileByEmail,
   getProfileByName,
+  searchByCardNumber,
 };

@@ -14,8 +14,10 @@ const {
   updateProfileEndDate,
   deleteFile,
   getProfileByName,
+  searchByCardNumber,
 } = require('../controllers/profileController');
 const multer = require('multer');
+const verifyToken = require('../middlewares/authMiddleware');
 
 const storage = multer.memoryStorage(); // Almacena el archivo en memoria
 const upload = multer({ storage: storage });
@@ -29,6 +31,8 @@ router.get('/get/all', getAllProfiles);
 router.get('/get/:id', getProfile);
 
 router.get('/search', searchProfile);
+
+router.get('/searchByCardNumber', searchByCardNumber);
 
 router.post('/get/getProfileByName', getProfileByName);
 
