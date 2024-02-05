@@ -33,13 +33,17 @@ const scanMember = async (req, res) => {
       return;
     }
     const formatCurrentDateTime = currentDateTime.toISOString().split('T')[0];
+    console.log('Entro al a expiracion 1');
 
     if (formatCurrentDateTime > profileData.profileEndDate) {
+      console.log('Entro al a expiracion 2');
+
       if (
         formatCurrentDateTime >=
-          profileData.renewMembershipInQueue.profileRenewStartDate &&
-        profileData.renewMembershipInQueue.renewIsInQueue
+          profileData?.renewMembershipInQueue?.profileRenewStartDate &&
+        profileData?.renewMembershipInQueue?.renewIsInQueue
       ) {
+        console.log('Entro al a expiracion 3');
         const renewMembershipInQueue = profileData.renewMembershipInQueue;
 
         // Realiza los cambios en profileData utilizando los valores de renewMembershipInQueue
@@ -78,6 +82,7 @@ const scanMember = async (req, res) => {
         await profileDoc.ref.set(profileData, { merge: true });
       } else {
         // Membership has expired, and there is no renewal in queue
+        console.log('Entro al a expiracion 4');
         res
           .status(403)
           .send(
