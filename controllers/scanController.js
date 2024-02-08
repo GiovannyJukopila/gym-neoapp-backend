@@ -22,6 +22,20 @@ const scanMember = async (req, res) => {
     const accessHistoryRef = db.collection('accessHistory');
 
     const gymId = profileData.gymId;
+    const isFrozen =
+      profileData.profileFrozen !== undefined
+        ? profileData.profileFrozen
+        : false;
+
+    if (isFrozen) {
+      res
+        .status(403)
+        .send(
+          'Your membership is currently frozen. You cannot check in or check out until it is unfrozen.'
+        );
+      return;
+    }
+
     const gymRef = db.collection('gyms').doc(gymId);
     const [gymDoc, membershipSnapshot] = await Promise.all([
       gymRef.get(),
@@ -33,17 +47,13 @@ const scanMember = async (req, res) => {
       return;
     }
     const formatCurrentDateTime = currentDateTime.toISOString().split('T')[0];
-    console.log('Entro al a expiracion 1');
 
     if (formatCurrentDateTime > profileData.profileEndDate) {
-      console.log('Entro al a expiracion 2');
-
       if (
         formatCurrentDateTime >=
           profileData?.renewMembershipInQueue?.profileRenewStartDate &&
         profileData?.renewMembershipInQueue?.renewIsInQueue
       ) {
-        console.log('Entro al a expiracion 3');
         const renewMembershipInQueue = profileData.renewMembershipInQueue;
 
         // Realiza los cambios en profileData utilizando los valores de renewMembershipInQueue
@@ -68,12 +78,22 @@ const scanMember = async (req, res) => {
         profileData.renewMembershipInQueue.renewIsInQueue = false;
         profileData.profileStartDate =
           renewMembershipInQueue.profileRenewStartDate;
-        profileData.profileIsACouple =
-          renewMembershipInQueue.profileRenewIsCouple;
-        profileData.profileCoupleName =
-          renewMembershipInQueue.profileRenewCoupleName;
-        profileData.profileRenewCoupleEmail =
-          renewMembershipInQueue.profileRenewCoupleEmail;
+        if (renewMembershipInQueue.profileRenewIsCouple !== undefined) {
+          profileData.profileIsACouple =
+            renewMembershipInQueue.profileRenewIsCouple;
+        }
+
+        // Verifica si el campo existe antes de intentar establecerlo
+        if (renewMembershipInQueue.profileRenewCoupleName !== undefined) {
+          profileData.profileCoupleName =
+            renewMembershipInQueue.profileRenewCoupleName;
+        }
+
+        // Verifica si el campo existe antes de intentar establecerlo
+        if (renewMembershipInQueue.profileRenewCoupleEmail !== undefined) {
+          profileData.profileRenewCoupleEmail =
+            renewMembershipInQueue.profileRenewCoupleEmail;
+        }
 
         // Elimina la propiedad renewMembershipInQueue
         //delete profileData.renewMembershipInQueue;
@@ -82,7 +102,6 @@ const scanMember = async (req, res) => {
         await profileDoc.ref.set(profileData, { merge: true });
       } else {
         // Membership has expired, and there is no renewal in queue
-        console.log('Entro al a expiracion 4');
         res
           .status(403)
           .send(

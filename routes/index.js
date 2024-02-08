@@ -12,6 +12,7 @@ const guestsRouter = require('./guests.router');
 const dashboardRouter = require('./dashboard.router');
 const reportsRouter = require('./reports.router');
 const financialRouter = require('./financial.router');
+const adminsRouter = require('./admins.router');
 
 const router = express.Router();
 //app.use('/api/v1', router);
@@ -23,6 +24,7 @@ router.use('/auth', authRouter);
 router.use('/classes', classesRouter);
 router.use('/notification', notificationRouter);
 router.use('/trainers', trainersRouter);
+router.use('/admins', adminsRouter);
 router.use('/guests', guestsRouter);
 router.use('/dashboard', dashboardRouter);
 router.use('/reports', reportsRouter);

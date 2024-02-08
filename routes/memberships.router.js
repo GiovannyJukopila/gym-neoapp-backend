@@ -4,11 +4,13 @@ const {
   getMembership,
   getUsersByMonthForMembership,
   getTotalUsersByMonth,
-  updateTotalUsersByMonth,
+  updateTotalAmountByMonth,
+  generateMembershipsReport,
   createMembership,
   updateMembership,
   deleteMembership,
 } = require('../controllers/membershipController');
+const verifyToken = require('../middlewares/authMiddleware');
 
 const router = express.Router();
 
@@ -20,7 +22,13 @@ router.get('/:membershipId/users-by-month', getUsersByMonthForMembership);
 
 router.get('/getTotalUsersByMonth/:gymId', getTotalUsersByMonth);
 
-router.get('/updateTotalUsersByMonth/:gymId', updateTotalUsersByMonth);
+router.get('/updateTotalAmountByMonth/:gymId', updateTotalAmountByMonth);
+
+router.post(
+  '/generateMembershipsReport/:gymId',
+  verifyToken,
+  generateMembershipsReport
+);
 
 router.post('/create', createMembership);
 

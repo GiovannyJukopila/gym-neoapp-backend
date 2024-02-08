@@ -1,17 +1,17 @@
-const ExcelJS = require("exceljs");
-const admin = require("firebase-admin");
-const { db } = require("../firebase");
+const ExcelJS = require('exceljs');
+const admin = require('firebase-admin');
+const { db } = require('../firebase');
 
-const gymIdToFilter = "marriot-1";
-const roleToFilter = "member";
-const profilesRef = db.collection("profiles");
+const gymIdToFilter = 'marriot-1';
+const roleToFilter = 'member';
+const profilesRef = db.collection('profiles');
 const workbook = new ExcelJS.Workbook();
-const worksheet = workbook.addWorksheet("Profiles");
+const worksheet = workbook.addWorksheet('Profiles');
 
 profilesRef
-  .where("gymId", "==", gymIdToFilter)
-  .where("role", "==", roleToFilter)
-  .where("renewMembershipInQueue.renewIsInQueue", "==", true) // Nueva condición
+  .where('gymId', '==', gymIdToFilter)
+  .where('role', '==', roleToFilter)
+  .where('renewMembershipInQueue.renewIsInQueue', '==', true) // Nueva condición
   .get()
   .then((snapshot) => {
     const profilesData = [];
@@ -21,42 +21,40 @@ profilesRef
 
     // Configuración de las columnas del archivo Excel
     worksheet.columns = [
-      { header: "Index", key: "index" },
-      { header: "Profile Name", key: "profileName" },
-      { header: "Profile Lastname", key: "profileLastname" },
-      { header: "Card Serial Number", key: "cardSerialNumber" },
-      { header: "Membership ID", key: "membershipId" },
-      { header: "Start Date", key: "profileStartDate" },
-      { header: "Expiration Date", key: "profileEndDate" },
-      { header: "Profile Status", key: "profileStatus" },
+      { header: 'Index', key: 'index' },
+      { header: 'Profile Name', key: 'profileName' },
+      { header: 'Profile Lastname', key: 'profileLastname' },
+      { header: 'Card Serial Number', key: 'cardSerialNumber' },
+      { header: 'Membership ID', key: 'membershipId' },
+      { header: 'Start Date', key: 'profileStartDate' },
+      { header: 'Expiration Date', key: 'profileEndDate' },
+      { header: 'Profile Status', key: 'profileStatus' },
     ];
 
     // Llena el archivo Excel con los datos filtrados
     profilesData.forEach((profile, index) => {
       worksheet.addRow({
         index: index + 1,
-        profileName: profile.profileName || "",
-        profileLastname: profile.profileLastname || "",
-        cardSerialNumber: profile.cardSerialNumber || "",
-        membershipId: profile.membershipId || "",
-        profileStartDate: profile.profileStartDate || "",
-        profileEndDate: profile.profileEndDate || "",
-        profileStatus: profile.profileStatus || "",
+        profileName: profile.profileName || '',
+        profileLastname: profile.profileLastname || '',
+        cardSerialNumber: profile.cardSerialNumber || '',
+        membershipId: profile.membershipId || '',
+        profileStartDate: profile.profileStartDate || '',
+        profileEndDate: profile.profileEndDate || '',
+        profileStatus: profile.profileStatus || '',
       });
     });
 
     // Guarda el archivo Excel en una ubicación específica
-    const outputPath = "profiles.xlsx";
+    const outputPath = 'profiles.xlsx';
 
     workbook.xlsx
       .writeFile(outputPath)
-      .then(() => {
-        console.log("Archivo Excel generado exitosamente.");
-      })
+      .then(() => {})
       .catch((error) => {
-        console.error("Error al guardar el archivo Excel:", error);
+        console.error('Error al guardar el archivo Excel:', error);
       });
   })
   .catch((error) => {
-    console.error("Error al obtener datos de Firestore:", error);
+    console.error('Error al obtener datos de Firestore:', error);
   });

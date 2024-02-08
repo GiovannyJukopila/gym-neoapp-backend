@@ -2,188 +2,318 @@ const fs = require('fs');
 const admin = require('firebase-admin');
 const { db } = require('../firebase');
 const PDFDocument = require('pdfkit-table');
+const { format } = require('date-fns');
 // const PDFDocumentTable = require('pdfkit-table');
 
 const ExcelJS = require('exceljs');
 
+const getLocalTime = (currentDateTime, gymTimeZone) => {
+  const offsetMatch = /UTC([+-]?\d*\.?\d*)/.exec(gymTimeZone);
+  if (offsetMatch) {
+    const offsetHours = parseFloat(offsetMatch[1]);
+
+    return new Date(currentDateTime.getTime() + offsetHours * 60 * 60 * 1000);
+  } else {
+    throw new Error('Invalid time zone format.');
+  }
+};
 const generateGlobalReport = async (req, res) => {
   try {
     const { gymId, startDate, endDate } = req.body;
 
-    // Obtener el historial de pagos
-    const paymentHistoryRef = db.collection('paymentHistory');
-    const paymentSnapshot = await paymentHistoryRef
+    const gymSnapshot = await admin
+      .firestore()
+      .collection('gyms')
+      .doc(gymId)
+      .get();
+    const gymData = gymSnapshot.data();
+    const gymTimeZone = gymData.gymTimeZone;
+    const utcDate = new Date();
+    const localDate = getLocalTime(utcDate, gymTimeZone);
+
+    const formattedDate = localDate.toISOString().split('T')[0];
+    const formatNewDate = localDate.toISOString().slice(11, 16);
+
+    const hours = parseInt(formatNewDate.slice(0, 2));
+    const minutes = parseInt(formatNewDate.slice(3, 5));
+
+    // Determinar si es AM o PM
+    const period = hours < 12 ? 'AM' : 'PM';
+
+    // Convertir las horas al formato de 12 horas
+    const hours12 = hours % 12 || 12;
+
+    // Formatear la hora en el formato deseado (12 horas)
+    const formattedTime12 = `${hours12}:${
+      minutes < 10 ? '0' : ''
+    }${minutes} ${period}`;
+    // Consultar los pagos en el rango de fechas y para el gymId específico
+    const snapshot = await db
+      .collection('paymentHistory')
+      .where('paymentDate', '>=', startDate)
+      .where('paymentDate', '<=', endDate)
       .where('gymId', '==', gymId)
       .get();
 
-    // Obtener las membresías asociadas al gimnasio
-    const membershipsRef = db.collection('memberships');
-    const membershipSnapshot = await membershipsRef
-      .where('gymId', '==', gymId)
-      .get();
+    const payments = snapshot.docs.map((doc) => doc.data());
 
-    const userCountsByMonth = {};
+    const monthlyData = {};
 
-    paymentSnapshot.forEach((paymentDoc) => {
-      const profileData = paymentDoc.data();
-      const paymentStartDate = new Date(profileData.paymentStartDate);
-      const paymentEndDate = new Date(profileData.paymentEndDate);
+    // Procesar los pagos y agruparlos por mes
+    payments.forEach((payment) => {
+      const monthYear = payment.paymentDate.substring(0, 7); // Tomar solo el año y mes
 
-      const membershipId = profileData.membershipId;
-      const membershipDoc = membershipSnapshot.docs.find(
-        (doc) => doc.id === membershipId
-      );
-      const membershipData = membershipDoc ? membershipDoc.data() : null;
-      const planName = membershipData ? membershipData.planName : '';
-
-      let currentDate = new Date(paymentStartDate);
-      currentDate.setDate(1); // Ajusta el currentDate al inicio del mes
-
-      while (currentDate <= paymentEndDate) {
-        const monthYearKey = `${currentDate.getFullYear()}-${(
-          '0' +
-          (currentDate.getMonth() + 1)
-        ).slice(-2)}`;
-
-        if (!userCountsByMonth[monthYearKey]) {
-          userCountsByMonth[monthYearKey] = {};
-          userCountsByMonth[monthYearKey]['Total Members'] = 0; // Agregar el campo de 'Total Members'
-        }
-        if (!userCountsByMonth[monthYearKey][planName]) {
-          userCountsByMonth[monthYearKey][planName] = 0;
-        }
-        userCountsByMonth[monthYearKey][planName]++;
-        userCountsByMonth[monthYearKey]['Total Members']++; // Incrementar el total de miembros
-
-        currentDate.setMonth(currentDate.getMonth() + 1);
-        currentDate.setDate(1); // Avanza al siguiente mes
+      if (!monthlyData[monthYear]) {
+        monthlyData[monthYear] = 0;
       }
+
+      monthlyData[monthYear] += payment.paymentAmount;
     });
 
-    // Crear un rango de fechas con todos los meses entre startDate y endDate
-    const dateRange = [];
-    let currentDate = new Date(startDate);
-    currentDate.setDate(1); // Establecer en el primer día del mes
+    const doc = new PDFDocument();
 
-    while (currentDate <= new Date(endDate)) {
-      const monthYearKey = `${currentDate.getFullYear()}-${(
-        '0' +
-        (currentDate.getMonth() + 1)
-      ).slice(-2)}`;
-
-      dateRange.push(monthYearKey);
-
-      currentDate.setMonth(currentDate.getMonth() + 1); // Avanzar al siguiente mes
-    }
-
-    const allMonths = Object.keys(userCountsByMonth)
-      .filter((key) => dateRange.includes(key))
-      .map((key) => {
-        const [year, month] = key.split('-');
-        return {
-          key,
-          month: new Date(year, parseInt(month) - 1).toLocaleString('default', {
-            month: 'long',
-          }),
-        };
-      });
-
-    allMonths.sort((a, b) => {
-      const monthOrder = {
-        January: 0,
-        February: 1,
-        March: 2,
-        April: 3,
-        May: 4,
-        June: 5,
-        July: 6,
-        August: 7,
-        September: 8,
-        October: 9,
-        November: 10,
-        December: 11,
-      };
-      return monthOrder[a.month] - monthOrder[b.month];
+    // Agregamos contenido al PDF
+    doc.rect(0, 0, 612, 80).fill('#FFA500');
+    doc.fontSize(25).fill('white').text('TOTAL REVENUE REPORT', 50, 30, {
+      align: 'left',
+      valign: 'center',
     });
 
-    const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet('UserCountsByMonth');
+    doc
+      .fontSize(18)
+      .text(`${formattedDate}   ${formattedTime12}`, { bold: true })
+      .moveDown(0.5);
+    doc.moveDown();
 
-    const allMembershipPlans = Array.from(
-      new Set(
-        membershipSnapshot.docs.map((membership) => membership.data().planName)
-      )
-    );
+    doc
+      .fontSize(14)
+      .fill('black')
+      .text(`From ${startDate} to ${endDate}`, { bold: true })
+      .moveDown(0.5);
+    doc.moveDown();
 
-    // Obtener los nombres de planes presentes en los pagos
-    const membershipHeaders = Array.from(
-      new Set(
-        paymentSnapshot.docs.map((doc) => {
-          const membershipId = doc.data().membershipId;
-          const membershipDoc = membershipSnapshot.docs.find(
-            (membership) => membership.id === membershipId
-          );
-          return membershipDoc ? membershipDoc.data().planName : '';
-        })
-      )
-    );
+    // Ordenar las fechas para asegurarse de que estén en orden
+    const sortedDates = Object.keys(monthlyData).sort();
 
-    // Agregar los nombres de planes que no estén presentes con un valor inicial de 0
-    allMembershipPlans.forEach((plan) => {
-      if (!membershipHeaders.includes(plan)) {
-        membershipHeaders.push(plan);
-      }
+    // Crear una tabla más elaborada
+    const table = {
+      headers: ['Month', 'Total Revenue'],
+      rows: [],
+    };
+
+    // Llenar la tabla con datos y aplicar formato
+    sortedDates.forEach((monthYear) => {
+      const revenueFormatted = `€ ${monthlyData[monthYear].toFixed(2)}`;
+      table.rows.push([monthYear, revenueFormatted]);
     });
 
-    worksheet.columns = [
-      { header: 'Date', key: 'date' },
-      { header: 'Month', key: 'month' }, // Columna 'Month'
-      { header: 'Total Members', key: 'Total Members' }, // Columna 'Total Members'
-      ...membershipHeaders.map((header) => ({ header, key: header })),
+    // Establecer el ancho de las columnas
+    const columnWidths = [
+      doc.widthOfString('Month') + 30,
+      doc.widthOfString('Revenue') + 30,
     ];
+    table.widths = columnWidths;
 
-    allMonths.forEach((month) => {
-      const key = month.key;
-      const rowData = {
-        date: key,
-        'Total Members': userCountsByMonth[key]['Total Members'],
-        month: month.month,
-      };
-
-      membershipHeaders.forEach((header) => {
-        rowData[header] = userCountsByMonth[key][header] || 0;
-      });
-      worksheet.addRow(rowData);
+    // Imprimir la tabla en el PDF
+    doc.table(table, {
+      prepareHeader: () =>
+        doc.font('Helvetica-Bold').fill('black').fontSize(14), // Color negro para las cabeceras
+      prepareRow: (row, i) => doc.font('Helvetica').fontSize(12),
     });
 
-    // Ajustar ancho de columnas
-    worksheet.columns.forEach((column, index) => {
-      let maxLength = 0;
-      column.eachCell({ includeEmpty: true }, (cell) => {
-        const columnLength = cell.value ? cell.value.toString().length : 10;
-        if (columnLength > maxLength) {
-          maxLength = columnLength;
-        }
-      });
-      column.width = maxLength < 10 ? 10 : maxLength + 2;
-    });
+    // Establece el tipo de contenido y el encabezado de respuesta
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'inline; filename=revenue_report.pdf');
 
-    // Enviar el archivo Excel como respuesta
-    res.setHeader(
-      'Content-Type',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-    );
-    res.setHeader(
-      'Content-Disposition',
-      'attachment; filename="userCountsByMonth.xlsx"'
-    );
-    await workbook.xlsx.write(res);
-    res.end();
+    // Pasa el contenido del PDF directamente a la respuesta
+    doc.pipe(res);
+
+    // Finaliza el documento
+    doc.end();
   } catch (error) {
-    console.error('Error fetching profiles:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error('Error generando el informe global:', error);
+    res.status(500).send('Internal Server Error');
   }
 };
+
+// const generateGlobalReport = async (req, res) => {
+//   try {
+//     const { gymId, startDate, endDate } = req.body;
+
+//     // Obtener el historial de pagos
+//     const paymentHistoryRef = db.collection('paymentHistory');
+//     const paymentSnapshot = await paymentHistoryRef
+//       .where('gymId', '==', gymId)
+//       .get();
+
+//     // Obtener las membresías asociadas al gimnasio
+//     const membershipsRef = db.collection('memberships');
+//     const membershipSnapshot = await membershipsRef
+//       .where('gymId', '==', gymId)
+//       .get();
+
+//     const userCountsByMonth = {};
+
+//     paymentSnapshot.forEach((paymentDoc) => {
+//       const profileData = paymentDoc.data();
+//       const paymentStartDate = new Date(profileData.paymentStartDate);
+//       const paymentEndDate = new Date(profileData.paymentEndDate);
+
+//       const membershipId = profileData.membershipId;
+//       const membershipDoc = membershipSnapshot.docs.find(
+//         (doc) => doc.id === membershipId
+//       );
+//       const membershipData = membershipDoc ? membershipDoc.data() : null;
+//       const planName = membershipData ? membershipData.planName : '';
+
+//       let currentDate = new Date(paymentStartDate);
+//       currentDate.setDate(1); // Ajusta el currentDate al inicio del mes
+
+//       while (currentDate <= paymentEndDate) {
+//         const monthYearKey = `${currentDate.getFullYear()}-${(
+//           '0' +
+//           (currentDate.getMonth() + 1)
+//         ).slice(-2)}`;
+
+//         if (!userCountsByMonth[monthYearKey]) {
+//           userCountsByMonth[monthYearKey] = {};
+//           userCountsByMonth[monthYearKey]['Total Members'] = 0; // Agregar el campo de 'Total Members'
+//         }
+//         if (!userCountsByMonth[monthYearKey][planName]) {
+//           userCountsByMonth[monthYearKey][planName] = 0;
+//         }
+//         userCountsByMonth[monthYearKey][planName]++;
+//         userCountsByMonth[monthYearKey]['Total Members']++; // Incrementar el total de miembros
+
+//         currentDate.setMonth(currentDate.getMonth() + 1);
+//         currentDate.setDate(1); // Avanza al siguiente mes
+//       }
+//     });
+
+//     // Crear un rango de fechas con todos los meses entre startDate y endDate
+//     const dateRange = [];
+//     let currentDate = new Date(startDate);
+//     currentDate.setDate(1); // Establecer en el primer día del mes
+
+//     while (currentDate <= new Date(endDate)) {
+//       const monthYearKey = `${currentDate.getFullYear()}-${(
+//         '0' +
+//         (currentDate.getMonth() + 1)
+//       ).slice(-2)}`;
+
+//       dateRange.push(monthYearKey);
+
+//       currentDate.setMonth(currentDate.getMonth() + 1); // Avanzar al siguiente mes
+//     }
+
+//     const allMonths = Object.keys(userCountsByMonth)
+//       .filter((key) => dateRange.includes(key))
+//       .map((key) => {
+//         const [year, month] = key.split('-');
+//         return {
+//           key,
+//           month: new Date(year, parseInt(month) - 1).toLocaleString('default', {
+//             month: 'long',
+//           }),
+//         };
+//       });
+
+//     allMonths.sort((a, b) => {
+//       const monthOrder = {
+//         January: 0,
+//         February: 1,
+//         March: 2,
+//         April: 3,
+//         May: 4,
+//         June: 5,
+//         July: 6,
+//         August: 7,
+//         September: 8,
+//         October: 9,
+//         November: 10,
+//         December: 11,
+//       };
+//       return monthOrder[a.month] - monthOrder[b.month];
+//     });
+
+//     const workbook = new ExcelJS.Workbook();
+//     const worksheet = workbook.addWorksheet('UserCountsByMonth');
+
+//     const allMembershipPlans = Array.from(
+//       new Set(
+//         membershipSnapshot.docs.map((membership) => membership.data().planName)
+//       )
+//     );
+
+//     // Obtener los nombres de planes presentes en los pagos
+//     const membershipHeaders = Array.from(
+//       new Set(
+//         paymentSnapshot.docs.map((doc) => {
+//           const membershipId = doc.data().membershipId;
+//           const membershipDoc = membershipSnapshot.docs.find(
+//             (membership) => membership.id === membershipId
+//           );
+//           return membershipDoc ? membershipDoc.data().planName : '';
+//         })
+//       )
+//     );
+
+//     // Agregar los nombres de planes que no estén presentes con un valor inicial de 0
+//     allMembershipPlans.forEach((plan) => {
+//       if (!membershipHeaders.includes(plan)) {
+//         membershipHeaders.push(plan);
+//       }
+//     });
+
+//     worksheet.columns = [
+//       { header: 'Date', key: 'date' },
+//       { header: 'Month', key: 'month' }, // Columna 'Month'
+//       { header: 'Total Members', key: 'Total Members' }, // Columna 'Total Members'
+//       ...membershipHeaders.map((header) => ({ header, key: header })),
+//     ];
+
+//     allMonths.forEach((month) => {
+//       const key = month.key;
+//       const rowData = {
+//         date: key,
+//         'Total Members': userCountsByMonth[key]['Total Members'],
+//         month: month.month,
+//       };
+
+//       membershipHeaders.forEach((header) => {
+//         rowData[header] = userCountsByMonth[key][header] || 0;
+//       });
+//       worksheet.addRow(rowData);
+//     });
+
+//     // Ajustar ancho de columnas
+//     worksheet.columns.forEach((column, index) => {
+//       let maxLength = 0;
+//       column.eachCell({ includeEmpty: true }, (cell) => {
+//         const columnLength = cell.value ? cell.value.toString().length : 10;
+//         if (columnLength > maxLength) {
+//           maxLength = columnLength;
+//         }
+//       });
+//       column.width = maxLength < 10 ? 10 : maxLength + 2;
+//     });
+
+//     // Enviar el archivo Excel como respuesta
+//     res.setHeader(
+//       'Content-Type',
+//       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+//     );
+//     res.setHeader(
+//       'Content-Disposition',
+//       'attachment; filename="userCountsByMonth.xlsx"'
+//     );
+//     await workbook.xlsx.write(res);
+//     res.end();
+//   } catch (error) {
+//     console.error('Error fetching profiles:', error);
+//     res.status(500).json({ error: 'Internal server error' });
+//   }
+// };
 
 const generateReportByMembership = async (req, res) => {
   try {
@@ -790,9 +920,200 @@ const generateDailyReport = async (req, res) => {
   }
 };
 
+const generateActiveMembersReport = async (req, res) => {
+  try {
+    const { gymId } = req.params;
+    const profilesRef = db.collection('profiles');
+    const membershipsRef = db.collection('memberships');
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Active Members');
+
+    const snapshot = await profilesRef
+      .where('gymId', '==', gymId)
+      .where('role', '==', 'member')
+      .where('profileStatus', '==', true)
+      .get();
+
+    const profilesData = [];
+    const membershipDataMap = new Map();
+
+    // Additional query to get membership data
+    const membershipsSnapshot = await membershipsRef.get();
+    membershipsSnapshot.forEach((membershipDoc) => {
+      const membershipData = membershipDoc.data();
+      const membershipId = membershipDoc.id;
+      membershipDataMap.set(membershipId, membershipData);
+    });
+
+    snapshot.forEach((doc) => {
+      profilesData.push(doc.data());
+    });
+
+    // Configuración de las columnas del archivo Excel
+    worksheet.columns = [
+      { header: 'Index', key: 'index', width: 5 },
+      { header: 'Profile Name', key: 'profileName', width: 15 },
+      { header: 'Profile Lastname', key: 'profileLastname', width: 15 },
+      { header: 'Card Serial Number', key: 'cardSerialNumber', width: 15 },
+      { header: 'Start Date', key: 'profileStartDate', width: 15 },
+      { header: 'Expiration Date', key: 'profileEndDate', width: 15 },
+      { header: 'Plan Name', key: 'planName', width: 20 },
+      { header: 'Profile Status', key: 'profileStatus', width: 15 },
+    ];
+
+    // Llena el archivo Excel con los datos filtrados
+    profilesData.forEach((profile, index) => {
+      const membershipId = profile.membershipId || '';
+      const membershipData = membershipDataMap.get(membershipId) || {};
+      const planName = membershipData.planName || '';
+
+      worksheet.addRow({
+        index: index + 1,
+        profileName: profile.profileName || '',
+        profileLastname: profile.profileLastname || '',
+        cardSerialNumber: profile.cardSerialNumber || '',
+        profileStartDate: profile.profileStartDate || '',
+        profileEndDate: profile.profileEndDate || '',
+        planName: planName,
+        profileStatus: profile.profileStatus ? 'Active' : 'Inactive',
+      });
+    });
+
+    // Guarda el archivo Excel en una ubicación específica
+    const outputPath = `active_members_${gymId}.xlsx`;
+
+    workbook.xlsx
+      .writeFile(outputPath)
+      .then(() => {
+        c;
+
+        // Puedes enviar el archivo al cliente como respuesta
+        res.download(outputPath, (downloadError) => {
+          if (downloadError) {
+            console.error(
+              'Error al descargar el archivo Excel:',
+              downloadError
+            );
+          }
+          // Elimina el archivo después de enviarlo al cliente
+          // Puedes omitir esta parte si prefieres conservar el archivo
+          require('fs').unlink(outputPath, (unlinkError) => {
+            if (unlinkError) {
+              console.error('Error al eliminar el archivo Excel:', unlinkError);
+            }
+          });
+        });
+      })
+      .catch((writeError) => {
+        console.error('Error al guardar el archivo Excel:', writeError);
+        res.status(500).json({ error: 'Error interno del servidor' });
+      });
+  } catch (error) {
+    console.error('Error al generar el informe de miembros activos:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+};
+const generateInactiveMembersReport = async (req, res) => {
+  try {
+    const { gymId } = req.params;
+    const profilesRef = db.collection('profiles');
+    const membershipsRef = db.collection('memberships');
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Inactive Members');
+
+    const snapshot = await profilesRef
+      .where('gymId', '==', gymId)
+      .where('role', '==', 'member')
+      .where('profileStatus', '==', false)
+      .get();
+
+    const profilesData = [];
+    const membershipDataMap = new Map();
+
+    // Additional query to get membership data
+    const membershipsSnapshot = await membershipsRef.get();
+    membershipsSnapshot.forEach((membershipDoc) => {
+      const membershipData = membershipDoc.data();
+      const membershipId = membershipDoc.id;
+      membershipDataMap.set(membershipId, membershipData);
+    });
+
+    snapshot.forEach((doc) => {
+      const profileData = doc.data();
+      const membershipId = profileData.membershipId || '';
+      const membershipData = membershipDataMap.get(membershipId) || {};
+      const planName = membershipData.planName || '';
+
+      // Agregar la columna adicional "Inactive Type"
+      const inactiveType =
+        profileData.profileFrozen ?? false ? 'Frozen' : 'Expired';
+
+      profilesData.push({
+        ...profileData,
+        planName: planName,
+        inactiveType: inactiveType,
+      });
+    });
+    profilesData.sort((a, b) => {
+      if (a.inactiveType === 'Frozen' && b.inactiveType !== 'Frozen') {
+        return -1;
+      } else if (a.inactiveType !== 'Frozen' && b.inactiveType === 'Frozen') {
+        return 1;
+      }
+      return 0;
+    });
+    // Configuración de las columnas del archivo Excel
+    worksheet.columns = [
+      { header: 'Index', key: 'index', width: 5 },
+      { header: 'Profile Name', key: 'profileName', width: 15 },
+      { header: 'Profile Lastname', key: 'profileLastname', width: 15 },
+      { header: 'Card Serial Number', key: 'cardSerialNumber', width: 15 },
+      { header: 'Start Date', key: 'profileStartDate', width: 15 },
+      { header: 'Expiration Date', key: 'profileEndDate', width: 15 },
+      { header: 'Plan Name', key: 'planName', width: 20 },
+      { header: 'Profile Status', key: 'profileStatus', width: 15 },
+      { header: 'Inactive Type', key: 'inactiveType', width: 15 }, // Nueva columna
+    ];
+
+    // Llena el archivo Excel con los datos filtrados
+    profilesData.forEach((profile, index) => {
+      worksheet.addRow({
+        index: index + 1,
+        profileName: profile.profileName || '',
+        profileLastname: profile.profileLastname || '',
+        cardSerialNumber: profile.cardSerialNumber || '',
+        profileStartDate: profile.profileStartDate || '',
+        profileEndDate: profile.profileEndDate || '',
+        planName: profile.planName || '',
+        profileStatus: profile.profileStatus ? 'Active' : 'Inactive',
+        inactiveType: profile.inactiveType || '',
+      });
+    });
+
+    // Guarda el archivo Excel en una ubicación específica
+    const outputPath = `inactive_members_report_${gymId}.xlsx`;
+
+    await workbook.xlsx.writeFile(outputPath);
+
+    // Puedes enviar el archivo Excel como respuesta a la solicitud HTTP
+    res.status(200).download(outputPath, (err) => {
+      if (err) {
+        console.error('Error al enviar el archivo Excel como respuesta:', err);
+        res.status(500).json({ error: 'Error interno del servidor' });
+      } else {
+      }
+    });
+  } catch (error) {
+    console.error('Error al generar el informe de miembros inactivos:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+};
+
 module.exports = {
   generateGlobalReport,
   generateReportByMembership,
   generateDailyReport,
   generateExpirationReport,
+  generateActiveMembersReport,
+  generateInactiveMembersReport,
 };

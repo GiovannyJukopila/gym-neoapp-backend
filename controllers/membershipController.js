@@ -3,12 +3,14 @@ const app = express();
 const { db } = require('../firebase');
 const bodyParser = require('body-parser');
 const admin = require('firebase-admin');
+const PDFDocument = require('pdfkit-table');
 app.use(bodyParser.json());
 const {
   format,
   startOfMonth,
   endOfMonth,
   addMonths,
+  isValid,
   isWithinInterval,
 } = require('date-fns');
 
@@ -160,7 +162,7 @@ const getTotalUsersByMonth = async (req, res) => {
     }
 
     // Obtener el objeto 'userCountsByMonth' del documento
-    const userCountsByMonth = gymDoc.data().userCountsByMonth;
+    const userCountsByMonth = gymDoc.data().totalAmountByMonth;
 
     // Devolver el objeto como respuesta
     res.status(200).json(userCountsByMonth);
@@ -170,61 +172,44 @@ const getTotalUsersByMonth = async (req, res) => {
   }
 };
 
-const updateTotalUsersByMonth = async (req, res) => {
+const updateTotalAmountByMonth = async (req, res) => {
   try {
     const { gymId } = req.params;
     const paymentHistoryRef = db.collection('paymentHistory');
     const snapshot = await paymentHistoryRef.where('gymId', '==', gymId).get();
 
-    const userCountsByMonth = {};
-    const currentYear = new Date().getFullYear();
+    const totalAmountByMonth = {};
     const gymRef = db.collection('gyms').doc(gymId);
-    // Array para almacenar promesas de consultas de perfiles
-    const profilePromises = [];
 
     snapshot.forEach((doc) => {
-      const profileData = doc.data();
-      const startDate = new Date(profileData.paymentStartDate);
-      const memberId = profileData.profileId;
-      const endDate = new Date(profileData.paymentEndDate);
-      let currentDate = new Date(startDate); // Inicializa en la fecha de inicio del pago
+      const paymentData = doc.data();
+      const paymentDate = paymentData.paymentDate;
+      const amount = paymentData.paymentAmount;
 
-      // Agregar la promesa de consulta del perfil al array
-      const profilePromise = db.collection('profiles').doc(memberId).get();
-      profilePromises.push(profilePromise);
+      // Intentar crear un objeto Date
+      const dateObject = new Date(paymentDate);
 
-      while (currentDate <= endDate) {
-        // Verifica si la fecha está en el año actual
-        if (currentDate.getFullYear() === currentYear) {
-          const monthYearKey = format(currentDate, 'yyyy-MM');
+      // Verificar si la fecha es válida antes de formatearla
+      if (isValid(dateObject)) {
+        const monthYearKey = format(dateObject, 'yyyy-MM');
 
-          if (!userCountsByMonth[monthYearKey]) {
-            userCountsByMonth[monthYearKey] = 0;
-          }
-
-          // Actualiza el contador solo si el perfil es 'active'
-          profilePromise.then((profileSnapshot) => {
-            const profileStatus = profileSnapshot.data()?.profileStatus;
-            if (profileStatus === true) {
-              userCountsByMonth[monthYearKey]++;
-            }
-          });
+        if (!totalAmountByMonth[monthYearKey]) {
+          totalAmountByMonth[monthYearKey] = 0;
         }
 
-        currentDate = addMonths(currentDate, 1); // Avanza al siguiente mes
+        totalAmountByMonth[monthYearKey] += amount;
+      } else {
+        console.warn(`Fecha no válida: ${paymentDate}`);
       }
     });
 
-    // Espera a que todas las promesas de consulta del perfil se resuelvan antes de enviar la respuesta
-    await Promise.all(profilePromises);
-
     await gymRef.update({
-      userCountsByMonth: userCountsByMonth,
+      totalAmountByMonth: totalAmountByMonth,
     });
 
-    res.status(200).json(userCountsByMonth);
+    res.status(200).json(totalAmountByMonth);
   } catch (error) {
-    console.error('Error fetching profiles:', error);
+    console.error('Error fetching payments:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 };
@@ -341,14 +326,80 @@ const deleteMembership = async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 };
+const generateMembershipsReport = async (req, res) => {
+  const { gymId } = req.params;
+
+  try {
+    const membershipsSnapshot = await db
+      .collection('memberships')
+      .where('gymId', '==', gymId)
+      .get();
+    const memberships = membershipsSnapshot.docs.map((doc) => doc.data());
+    const gymSnapshot = await admin
+      .firestore()
+      .collection('gyms')
+      .doc(gymId)
+      .get();
+    const gymData = gymSnapshot.data();
+    const gymTimeZone = gymData.gymTimeZone;
+    const utcOffset = getUtcOffset(gymTimeZone);
+
+    const utcDate = new Date();
+    const localTimeInMilliseconds = utcDate.getTime() - utcOffset * 60 * 1000;
+
+    const currentDate = new Date(localTimeInMilliseconds);
+    currentDate.setUTCHours(0, 0, 0, 0);
+
+    const dateString = currentDate.toISOString().split('T')[0];
+    // Crear un nuevo documento PDF
+    const doc = new PDFDocument();
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Disposition',
+      'inline; filename="memberships_report.pdf"'
+    );
+    doc.pipe(res);
+
+    // Encabezado del documento
+    doc.rect(0, 0, 612, 80).fill('#FFA500');
+    doc
+      .fontSize(25)
+      .fill('white')
+      .text('MEMBERSHIPS REPORT', 50, 30, { align: 'left', valign: 'center' });
+
+    doc.fontSize(18).text(`${dateString}`, { bold: true }).moveDown(1);
+    // Crear la tabla en el PDF
+    doc.table({
+      headers: ['Membership', 'Current Total Members'],
+      rows: memberships.map((membership) => [
+        membership.planName,
+        membership.currentTotalMembers,
+      ]),
+      fontSize: 12,
+      width: { 0: 250, 1: 150 },
+    });
+
+    // Finalizar el documento
+    doc.end();
+  } catch (error) {
+    console.error(error);
+    res.status(500).send('Error generando el informe de membresías');
+  }
+};
+const getUtcOffset = (timeZoneStr) => {
+  const sign = timeZoneStr.includes('-') ? -1 : 1;
+  const offsetStr = timeZoneStr.split(/[\+\-]/)[1];
+  return parseInt(offsetStr, 10) * sign;
+};
 
 module.exports = {
   getAllMemberships,
   getMembership,
   getUsersByMonthForMembership,
   getTotalUsersByMonth,
-  updateTotalUsersByMonth,
+  updateTotalAmountByMonth,
   createMembership,
   updateMembership,
   deleteMembership,
+  generateMembershipsReport,
 };

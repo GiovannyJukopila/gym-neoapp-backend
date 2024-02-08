@@ -550,7 +550,7 @@ const freezeMembership = async (req, res) => {
       .update({
         profileFrozen: profileFrozen,
         profileFrozenStartDate: new Date().toISOString().slice(0, 10),
-        //profileStatus: false,
+        profileStatus: false,
         profileUnFrozen: false,
       });
 
@@ -607,7 +607,7 @@ const unfreezeMembership = async (req, res) => {
       profileUnfreezeStartDate: profileUnfreezeStartDate,
       profileUnFreezeDays: profileUnFreezeDays,
       profileFrozenReason: profileFrozenReason,
-      //profileStatus: true,
+      profileStatus: true,
       profileUnFrozen: true,
     });
 

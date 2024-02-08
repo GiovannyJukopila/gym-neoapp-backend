@@ -388,8 +388,11 @@ const getGuestReport = async (req, res) => {
 const getCurrentMembersByMemberships = async (req, res) => {
   try {
     const { gymId } = req.params;
-    const profilesRef = db.collection('paymentHistory');
-    const snapshot = await profilesRef.where('gymId', '==', gymId).get();
+    const profilesRef = db.collection('profiles');
+    const snapshot = await profilesRef
+      .where('gymId', '==', gymId)
+      .where('profileStatus', '==', true)
+      .get();
 
     const gymSnapshot = await admin
       .firestore()
@@ -423,7 +426,6 @@ const getCurrentMembersByMemberships = async (req, res) => {
 
     const profilesCollection = db.collection('profiles');
     const promises = [];
-
     snapshot.forEach(async (doc) => {
       try {
         const profileData = doc.data();
@@ -438,24 +440,15 @@ const getCurrentMembersByMemberships = async (req, res) => {
           return; // Salir del bucle para este documento si no hay membershipId válido
         }
 
-        const startDate = profileData.paymentStartDate;
-        const endDate = profileData.paymentEndDate;
+        const startDate = profileData.profileStartDate;
+        const endDate = profileData.profileEndDate;
 
         const promise = profilesCollection
           .doc(profileId)
           .get()
           .then((profileDoc) => {
             if (profileDoc.exists) {
-              const profileStatus = profileDoc.data().profileStatus;
-
-              // Verificar si profileStatus es true y el pago intersecta con el mes actual
-              if (
-                profileStatus === true &&
-                startDate <= dateString &&
-                endDate >= dateString
-              ) {
-                membershipTotals[membershipId]++; // Incrementar total de miembros para la membresía actual
-              }
+              membershipTotals[membershipId]++; // Incrementar total de miembros para la membresía actual
             } else {
               console.warn(
                 `El documento del perfil con ID ${profileId} no existe`
@@ -544,12 +537,18 @@ const setInactiveMembers = async (req, res) => {
       .get();
 
     const batch = admin.firestore().batch();
-    profilesSnapshot.forEach((doc) => {
+    profilesSnapshot.forEach(async (doc) => {
       const profileData = doc.data();
+      const profileFrozen = profileData.profileFrozen || false;
       const profileEndDate = profileData.profileEndDate; // asumiendo que profileEndDate es una cadena
       const renewEndDate =
         profileData.renewMembershipInQueue?.profileRenewEndDate; // asumiendo que renewMembershipInQueue es un objeto opcional
       const profileRef = admin.firestore().collection('profiles').doc(doc.id);
+
+      if (profileFrozen) {
+        // No actualizar perfiles congelados
+        return;
+      }
       // Verificar si renewMembershipInQueue existe y renewIsInQueue es falso
       let profileStatus = false;
 
@@ -559,12 +558,59 @@ const setInactiveMembers = async (req, res) => {
       ) {
         profileStatus =
           profileData.renewMembershipInQueue.profileRenewEndDate > dateString;
+
+        const renewMembershipInQueue = profileData.renewMembershipInQueue;
+
+        // Realiza los cambios en profileData utilizando los valores de renewMembershipInQueue
+        profileData.profileEndDate = renewMembershipInQueue.profileRenewEndDate;
+        profileData.membershipId = renewMembershipInQueue.membership.value;
+        profileData.profileLastMembershipPrice =
+          renewMembershipInQueue.profileRenewLastMembershipPrice;
+        profileData.profileWasDiscount =
+          renewMembershipInQueue.profileRenewWasDiscount;
+        profileData.profileWasComplementary =
+          renewMembershipInQueue.profileRenewWasComplementary;
+        profileData.profileComplementaryReason =
+          renewMembershipInQueue.profileRenewComplementaryReason;
+        profileData.profileDiscountType =
+          renewMembershipInQueue.profileRenewDiscountType;
+        profileData.profileDiscountPercentage =
+          renewMembershipInQueue.profileRenewDiscountPercentage;
+        profileData.profileDiscountValue =
+          renewMembershipInQueue.profileRenewDiscountValue;
+        profileData.profileTotalReceive =
+          renewMembershipInQueue.profileRenewTotalReceive;
+        profileData.renewMembershipInQueue.renewIsInQueue = false;
+        profileData.profileStartDate =
+          renewMembershipInQueue.profileRenewStartDate;
+        if (renewMembershipInQueue.profileRenewIsCouple !== undefined) {
+          profileData.profileIsACouple =
+            renewMembershipInQueue.profileRenewIsCouple;
+        }
+
+        // Verifica si el campo existe antes de intentar establecerlo
+        if (renewMembershipInQueue.profileRenewCoupleName !== undefined) {
+          profileData.profileCoupleName =
+            renewMembershipInQueue.profileRenewCoupleName;
+        }
+
+        // Verifica si el campo existe antes de intentar establecerlo
+        if (renewMembershipInQueue.profileRenewCoupleEmail !== undefined) {
+          profileData.profileRenewCoupleEmail =
+            renewMembershipInQueue.profileRenewCoupleEmail;
+        }
+        batch.update(doc.ref, profileData);
+        // Elimina la propiedad renewMembershipInQueue
+        //delete profileData.renewMembershipInQueue;
+
+        // Guarda los cambios en la base de datos (suponiendo que profilesRef es tu referencia a la base de datos)
+        await doc.ref.set(profileData, { merge: true });
       } else {
         profileStatus = profileEndDate >= dateString;
+        batch.update(profileRef, { profileStatus });
       }
 
       // Actualizar el estado del perfil en el lote
-      batch.update(profileRef, { profileStatus });
     });
 
     // Ejecutar la actualización en lote
