@@ -985,8 +985,6 @@ const generateActiveMembersReport = async (req, res) => {
     workbook.xlsx
       .writeFile(outputPath)
       .then(() => {
-        c;
-
         // Puedes enviar el archivo al cliente como respuesta
         res.download(outputPath, (downloadError) => {
           if (downloadError) {
