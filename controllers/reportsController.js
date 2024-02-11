@@ -1107,6 +1107,133 @@ const generateInactiveMembersReport = async (req, res) => {
   }
 };
 
+const generateWalkinReport = async (req, res) => {
+  try {
+    const { gymId } = req.params;
+    const { selectedDate, sortBy } = req.body;
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Checkin Checkout Report');
+
+    // Consulta la colección accessHistory filtrando por gymId y timestamp
+    const accessHistorySnapshot = await db
+      .collection('accessHistory')
+      .where('gymId', '==', gymId)
+      .where('timestamp', '>=', new Date(selectedDate))
+      .where('timestamp', '<', new Date(selectedDate + 'T23:59:59'))
+      .get();
+
+    const reportData = [];
+
+    // Itera sobre los resultados de accessHistory
+    for (const accessDoc of accessHistorySnapshot.docs) {
+      const accessData = accessDoc.data();
+      const profileId = accessData.profileId;
+
+      // Consulta la colección profiles para obtener más información sobre el perfil
+      const profileSnapshot = await db
+        .collection('profiles')
+        .doc(profileId)
+        .get();
+      const profileData = profileSnapshot.data();
+
+      // Consulta la colección memberships para obtener el planName
+      const membershipId = profileData.membershipId;
+      const membershipSnapshot = await db
+        .collection('memberships')
+        .doc(membershipId)
+        .get();
+      const membershipData = membershipSnapshot.data();
+      const planName = membershipData.planName;
+
+      // Añade los datos al array para el informe
+      reportData.push({
+        timestamp: new Date(
+          accessData.timestamp._seconds * 1000 +
+            accessData.timestamp._nanoseconds / 1e6
+        ),
+        profileName: profileData.profileName,
+        profileLastname: profileData.profileLastname,
+        cardSerialNumber: profileData.cardSerialNumber,
+        planName: planName,
+        eventType: accessData.action, // Puedes cambiarlo según la estructura real
+      });
+    }
+    // reportData.sort((a, b) => a.planName.localeCompare(b.planName));
+
+    // reportData.sort((a, b) =>
+    //   a.cardSerialNumber.localeCompare(b.cardSerialNumber)
+    // );
+    if (sortBy === 'planName') {
+      reportData.sort((a, b) => a.planName.localeCompare(b.planName));
+    } else if (sortBy === 'cardSerialNumber') {
+      console.log('entro por aqui');
+      reportData.sort((a, b) =>
+        a.cardSerialNumber.localeCompare(b.cardSerialNumber)
+      );
+    } else {
+      // Orden por defecto (por timestamp u otro criterio)
+      // Aquí puedes ajustar el criterio de orden por defecto según tus necesidades
+      reportData.sort((a, b) => a.timestamp - b.timestamp);
+    }
+
+    // Configura las columnas del archivo Excel
+    worksheet.columns = [
+      { header: 'Index', key: 'index', width: 5 },
+      {
+        header: 'Date',
+        key: 'date',
+        width: 10,
+        style: {
+          numFmt: 'yyyy-mm-dd',
+        },
+      },
+      {
+        header: 'Time',
+        key: 'time',
+        width: 12,
+        style: {
+          numFmt: 'hh:mm:ss AM/PM',
+        },
+      },
+      { header: 'Name', key: 'profileName', width: 15 },
+      { header: 'Last Name', key: 'profileLastname', width: 15 },
+      { header: 'Card Number', key: 'cardSerialNumber', width: 15 },
+      { header: 'Membership', key: 'planName', width: 34 },
+      { header: 'Event Type', key: 'eventType', width: 15 },
+    ];
+
+    reportData.forEach((data, index) => {
+      const date = data.timestamp.toISOString().split('T')[0];
+      const time = data.timestamp.toLocaleTimeString('en-US', {
+        hour12: true,
+        hour: 'numeric',
+        minute: 'numeric',
+        second: 'numeric',
+      });
+
+      worksheet.addRow({
+        index: index + 1,
+        date: date,
+        time: time,
+        profileName: data.profileName,
+        profileLastname: data.profileLastname,
+        cardSerialNumber: data.cardSerialNumber,
+        planName: data.planName,
+        eventType: data.eventType,
+      });
+    });
+
+    // Configura la respuesta HTTP para enviar el archivo Excel
+    res.status(200).attachment('walk_in_report.xlsx');
+
+    // Guarda el archivo Excel y envía la respuesta
+    await workbook.xlsx.write(res);
+  } catch (error) {
+    console.error('Error al generar el informe de walk-ins:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+};
+
 module.exports = {
   generateGlobalReport,
   generateReportByMembership,
@@ -1114,4 +1241,5 @@ module.exports = {
   generateExpirationReport,
   generateActiveMembersReport,
   generateInactiveMembersReport,
+  generateWalkinReport,
 };

@@ -6,6 +6,7 @@ const {
   generateExpirationReport,
   generateActiveMembersReport,
   generateInactiveMembersReport,
+  generateWalkinReport,
 } = require('../controllers/reportsController');
 const verifyToken = require('../middlewares/authMiddleware');
 
@@ -29,5 +30,6 @@ router.post(
   verifyToken,
   generateExpirationReport
 );
+router.post('/generateWalkinReport/:gymId', verifyToken, generateWalkinReport);
 
 module.exports = router;

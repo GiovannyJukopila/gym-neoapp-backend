@@ -335,6 +335,12 @@ const generateMembershipsReport = async (req, res) => {
       .where('gymId', '==', gymId)
       .get();
     const memberships = membershipsSnapshot.docs.map((doc) => doc.data());
+
+    const totalMembers = memberships.reduce(
+      (sum, membership) => sum + membership.currentTotalMembers,
+      0
+    );
+
     const gymSnapshot = await admin
       .firestore()
       .collection('gyms')
@@ -367,7 +373,16 @@ const generateMembershipsReport = async (req, res) => {
       .fill('white')
       .text('MEMBERSHIPS REPORT', 50, 30, { align: 'left', valign: 'center' });
 
-    doc.fontSize(18).text(`${dateString}`, { bold: true }).moveDown(1);
+    doc.fontSize(18).text(`${dateString}`, { bold: true });
+
+    doc
+      .moveDown(1)
+      .fill('#0000')
+      .text(`Total Members: ${totalMembers}`, {
+        fontSize: 14,
+        bold: true,
+      })
+      .moveDown(1);
     // Crear la tabla en el PDF
     doc.table({
       headers: ['Membership', 'Current Total Members'],

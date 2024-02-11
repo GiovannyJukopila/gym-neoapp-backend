@@ -31,7 +31,7 @@ const scanMember = async (req, res) => {
       res
         .status(403)
         .send(
-          'Your membership is currently frozen. You cannot check in or check out until it is unfrozen.'
+          `${profileData.profileName} ${profileData.profileLastname}'s  membership is currently frozen.`
         );
       return;
     }
@@ -105,7 +105,7 @@ const scanMember = async (req, res) => {
         res
           .status(403)
           .send(
-            'Your membership has expired. You cannot check in or check out.'
+            `${profileData.profileName} ${profileData.profileLastname}'s Membership has EXPIRED.`
           );
         return;
       }
