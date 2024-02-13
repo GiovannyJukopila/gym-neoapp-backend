@@ -82,49 +82,50 @@ const getAdmins = async (req, res) => {
     // Agrega una cláusula where para filtrar por gymId
     const response = await getProfilesCollection
       .where('gymId', '==', gymId) // Filtrar perfiles por gymId
-      .where('role', '==', 'trainers')
+      .where('role', '==', 'admin')
       .limit(itemsPerPage)
       .offset(offset)
       .get();
 
     let profileArray = [];
     response.forEach((doc) => {
-      const profile = new Profile(
-        doc.data().profileId,
-
-        doc.data().cardSerialNumber,
-        doc.data().membershipId,
-        doc.data().gymId,
-        formatDate(doc.data().profileStartDate), // Formatear fecha de inicio
-        formatDate(doc.data().profileEndDate), // Formatear fecha de fin
-        formatDate(doc.data().profileRenewDate),
-        doc.data().profileIsAdmin,
-        doc.data().profileAdminLevel,
-        doc.data().profileName,
-        doc.data().profileLastname,
-        doc.data().profileEmail,
-        doc.data().profileBirthday,
-        doc.data().profileTelephoneNumber,
-        doc.data().profileFile,
-        doc.data().profileFileWasUpload,
-        doc.data().profilePicture,
-        doc.data().profileStatus,
-        doc.data().profilePostalCode,
-        doc.data().profileAddress,
-        doc.data().profileCity,
-        doc.data().profileCountry,
-        doc.data().profileFrozen,
-        doc.data().profileFrozenDays,
-        formatDate(doc.data().profileFrozenStartDate),
-        formatDate(doc.data().profileUnFreezeStartDate),
-        formatDate(doc.data().profileUnFreezeEndDate),
-        doc.data().profileUnFrozen,
-        doc.data().profileFileName,
-        doc.data().notCheckOut,
-        doc.data().wasCheckIn,
-        doc.data().role
-        // doc.data().profileFile,
-      );
+      const profile = {
+        profileId: doc.data().profileId,
+        cardSerialNumber: doc.data().cardSerialNumber,
+        membershipId: doc.data().membershipId,
+        gymId: doc.data().gymId,
+        profileStartDate: formatDate(doc.data().profileStartDate),
+        profileEndDate: formatDate(doc.data().profileEndDate),
+        profileRenewDate: formatDate(doc.data().profileRenewDate),
+        profileIsAdmin: doc.data().profileIsAdmin,
+        profileAdminLevel: doc.data().profileAdminLevel,
+        profileName: doc.data().profileName,
+        profileLastname: doc.data().profileLastname,
+        profileEmail: doc.data().profileEmail,
+        profileBirthday: doc.data().profileBirthday,
+        profileTelephoneNumber: doc.data().profileTelephoneNumber,
+        profileFile: doc.data().profileFile,
+        profileFileWasUpload: doc.data().profileFileWasUpload,
+        profilePicture: doc.data().profilePicture,
+        profileStatus: doc.data().profileStatus,
+        profilePostalCode: doc.data().profilePostalCode,
+        profileAddress: doc.data().profileAddress,
+        profileCity: doc.data().profileCity,
+        profileCountry: doc.data().profileCountry,
+        profileFrozen: doc.data().profileFrozen,
+        profileFrozenDays: doc.data().profileFrozenDays,
+        profileFrozenStartDate: formatDate(doc.data().profileFrozenStartDate),
+        profileUnFreezeStartDate: formatDate(
+          doc.data().profileUnFreezeStartDate
+        ),
+        profileUnFreezeEndDate: formatDate(doc.data().profileUnFreezeEndDate),
+        profileUnFrozen: doc.data().profileUnFrozen,
+        profileFileName: doc.data().profileFileName,
+        notCheckOut: doc.data().notCheckOut,
+        wasCheckIn: doc.data().wasCheckIn,
+        role: doc.data().role,
+        permissions: doc.data().permissions,
+      };
 
       profileArray.push(profile);
     });
@@ -180,9 +181,30 @@ const searchAdmin = async (req, res) => {
     res.status(500).send('Error fetching profiles');
   }
 };
+const getPermissions = async (req, res) => {
+  try {
+    const profileId = req.params.profileId;
+
+    // Consultar el documento en la colección 'profiles' con el profileId proporcionado
+    const profileRef = db.collection('profiles').doc(profileId);
+    const profileSnapshot = await profileRef.get();
+
+    if (!profileSnapshot.exists) {
+      return res.status(404).json({ error: 'Perfil no encontrado' });
+    }
+
+    // Obtener los datos del perfil y devolver los permisos
+    const profileData = profileSnapshot.data();
+    return res.json({ permissions: profileData.permissions });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ error: 'Error interno del servidor' });
+  }
+};
 
 module.exports = {
   createAdmin,
   getAdmins,
   searchAdmin,
+  getPermissions,
 };

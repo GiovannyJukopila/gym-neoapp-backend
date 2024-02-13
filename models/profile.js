@@ -45,7 +45,8 @@ class Profile {
     renewIsInQueue,
     profileCoupleName,
     profileCoupleEmail,
-    profileIsACouple
+    profileIsACouple,
+    permissions
   ) {
     this.profileId = profileId;
     this.cardSerialNumber = cardSerialNumber;
@@ -94,6 +95,8 @@ class Profile {
     this.profileCoupleName = profileCoupleName;
     this.profileCoupleEmail = profileCoupleEmail;
     this.profileIsACouple = profileIsACouple;
+
+    this.permissions = permissions;
   }
 }
 
