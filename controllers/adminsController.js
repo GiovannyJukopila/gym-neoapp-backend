@@ -43,8 +43,7 @@ const createAdmin = async (req, res) => {
             ? req.body.profileBirthday
             : '',
         profileTelephoneNumber: req.body.profileTelephoneNumber,
-        profileFile: req.body.profileFile !== null ? req.body.profileFile : '',
-        profileFileWasUpload: req.body.profileFileWasUpload,
+        profileFile: req.body.profileFile ?? '',
         profilePicture: req.body.profilePicture,
         profileStatus: req.body.profileStatus,
         profilePostalCode:
@@ -53,6 +52,7 @@ const createAdmin = async (req, res) => {
         profileCity: req.body.profileCity,
         profileCountry: req.body.profileCountry,
         role: 'admin',
+        permissions: req.body.permissions,
       };
 
       // Crea el nuevo perfil
