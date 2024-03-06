@@ -52,7 +52,8 @@ const createTrainer = async (req, res) => {
         profileAddress: req.body.profileAddress,
         profileCity: req.body.profileCity,
         profileCountry: req.body.profileCountry,
-        role: 'trainer',
+        role: req.body.profileIsAdmin ? ['admin', 'trainer'] : ['trainer'],
+        profileIsTrainer: true,
       };
 
       // Crea el nuevo perfil
@@ -82,49 +83,50 @@ const getTrainers = async (req, res) => {
     // Agrega una cláusula where para filtrar por gymId
     const response = await getProfilesCollection
       .where('gymId', '==', gymId) // Filtrar perfiles por gymId
-      .where('role', '==', 'trainer')
+      .where('role', 'array-contains', 'trainer')
       .limit(itemsPerPage)
       .offset(offset)
       .get();
 
     let profileArray = [];
     response.forEach((doc) => {
-      const profile = new Profile(
-        doc.data().profileId,
-
-        doc.data().cardSerialNumber,
-        doc.data().membershipId,
-        doc.data().gymId,
-        formatDate(doc.data().profileStartDate), // Formatear fecha de inicio
-        formatDate(doc.data().profileEndDate), // Formatear fecha de fin
-        formatDate(doc.data().profileRenewDate),
-        doc.data().profileIsAdmin,
-        doc.data().profileAdminLevel,
-        doc.data().profileName,
-        doc.data().profileLastname,
-        doc.data().profileEmail,
-        doc.data().profileBirthday,
-        doc.data().profileTelephoneNumber,
-        doc.data().profileFile,
-        doc.data().profileFileWasUpload,
-        doc.data().profilePicture,
-        doc.data().profileStatus,
-        doc.data().profilePostalCode,
-        doc.data().profileAddress,
-        doc.data().profileCity,
-        doc.data().profileCountry,
-        doc.data().profileFrozen,
-        doc.data().profileFrozenDays,
-        formatDate(doc.data().profileFrozenStartDate),
-        formatDate(doc.data().profileUnFreezeStartDate),
-        formatDate(doc.data().profileUnFreezeEndDate),
-        doc.data().profileUnFrozen,
-        doc.data().profileFileName,
-        doc.data().notCheckOut,
-        doc.data().wasCheckIn,
-        doc.data().role
-        // doc.data().profileFile,
-      );
+      const profile = {
+        profileId: doc.data().profileId,
+        cardSerialNumber: doc.data().cardSerialNumber,
+        membershipId: doc.data().membershipId,
+        gymId: doc.data().gymId,
+        profileStartDate: formatDate(doc.data().profileStartDate), // Formatear fecha de inicio
+        profileEndDate: formatDate(doc.data().profileEndDate), // Formatear fecha de fin
+        profileRenewDate: formatDate(doc.data().profileRenewDate),
+        profileIsAdmin: doc.data().profileIsAdmin,
+        profileAdminLevel: doc.data().profileAdminLevel,
+        profileName: doc.data().profileName,
+        profileLastname: doc.data().profileLastname,
+        profileEmail: doc.data().profileEmail,
+        profileBirthday: doc.data().profileBirthday,
+        profileTelephoneNumber: doc.data().profileTelephoneNumber,
+        profileFile: doc.data().profileFile,
+        profileFileWasUpload: doc.data().profileFileWasUpload,
+        profilePicture: doc.data().profilePicture,
+        profileStatus: doc.data().profileStatus,
+        profilePostalCode: doc.data().profilePostalCode,
+        profileAddress: doc.data().profileAddress,
+        profileCity: doc.data().profileCity,
+        profileCountry: doc.data().profileCountry,
+        profileFrozen: doc.data().profileFrozen,
+        profileFrozenDays: doc.data().profileFrozenDays,
+        profileFrozenStartDate: formatDate(doc.data().profileFrozenStartDate),
+        profileUnFreezeStartDate: formatDate(
+          doc.data().profileUnFreezeStartDate
+        ),
+        profileUnFreezeEndDate: formatDate(doc.data().profileUnFreezeEndDate),
+        profileUnFrozen: doc.data().profileUnFrozen,
+        profileFileName: doc.data().profileFileName,
+        notCheckOut: doc.data().notCheckOut,
+        wasCheckIn: doc.data().wasCheckIn,
+        role: doc.data().role,
+        profileIsTrainer: doc.data().profileIsTrainer,
+      };
 
       profileArray.push(profile);
     });
@@ -159,7 +161,7 @@ const searchTrainer = async (req, res) => {
     const profilesRef = db.collection('profiles');
     const snapshot = await profilesRef
       .where('gymId', '==', gymId)
-      .where('role', '==', 'trainer')
+      .where('role', 'array-contains', 'trainer')
       .get();
 
     const profiles = [];

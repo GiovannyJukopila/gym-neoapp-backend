@@ -103,7 +103,7 @@ function buildCustomEmailContent(subject, content, image, reason) {
 
             </div>
             <div class="footer">
-                <p>Neo App &copy; 2023 - All rights reserved</p>
+                <p>Neo App &copy; 2024 - All rights reserved</p>
             </div>
         </div>
     </body>
@@ -120,6 +120,7 @@ async function getMemberEmailsByGymId(gymId) {
     const querySnapshot = await db
       .collection('profiles')
       .where('gymId', '==', gymId)
+      .where('profileStatus', '==', true)
       .get();
 
     querySnapshot.forEach((doc) => {
@@ -139,7 +140,7 @@ async function getMemberEmailsByGymId(gymId) {
 async function sendCustomEmail(recipient, subject, emailContent, image) {
   try {
     const info = await transporter.sendMail({
-      from: '"No Reply - NeoApp 👻" <goneoapp@gmail.com>',
+      from: '"No Reply - NeoApp" <goneoapp@gmail.com>',
       bcc: recipient,
       subject: subject,
       html: emailContent, // Usar el contenido HTML generado

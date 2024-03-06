@@ -171,7 +171,7 @@ const getTrainers = async (req, res) => {
     const snapshot = await db
       .collection('profiles')
       .where('gymId', '==', gymId)
-      .where('role', '==', 'trainer')
+      .where('role', 'array-contains', 'trainer')
       .get();
 
     const trainers = snapshot.docs.map((doc) => doc.data());

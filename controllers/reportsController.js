@@ -930,7 +930,7 @@ const generateActiveMembersReport = async (req, res) => {
 
     const snapshot = await profilesRef
       .where('gymId', '==', gymId)
-      .where('role', '==', 'member')
+      .where('role', 'array-contains', 'member')
       .where('profileStatus', '==', true)
       .get();
 
@@ -1021,7 +1021,7 @@ const generateInactiveMembersReport = async (req, res) => {
 
     const snapshot = await profilesRef
       .where('gymId', '==', gymId)
-      .where('role', '==', 'member')
+      .where('role', 'array-contains', 'member')
       .where('profileStatus', '==', false)
       .get();
 

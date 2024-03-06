@@ -63,7 +63,7 @@ const createProfile = async (req, res) => {
         profileCountry: req.body.profileCountry,
         notCheckOut: req.body.notCheckOut,
         wasCheckIn: req.body.wasCheckIn,
-        role: 'member',
+        role: ['member'],
         profileGender: req.body.profileGender,
         profileLastMembershipPrice: req.body.profileLastMembershipPrice,
         profileWasDiscount: req.body.profileWasDiscount,
@@ -147,7 +147,7 @@ const getAllProfiles = async (req, res) => {
     // Agrega una cláusula where para filtrar por gymId
     const response = await getProfilesCollection
       .where('gymId', '==', gymId) // Filtrar perfiles por gymId
-      .where('role', '==', 'member')
+      .where('role', 'array-contains', 'member') // Verifica si el array contiene 'member'
       .limit(itemsPerPage)
       .offset(offset)
       .get();
@@ -374,8 +374,50 @@ const updateProfile = async (req, res) => {
       .collection('profiles')
       .doc(profileCode);
 
-    // Update the document with the data provided in formData
-    await profileRef.update(formData);
+    // Obtén el perfil actual para verificar los roles existentes
+    const currentProfile = await profileRef.get();
+
+    // Obtiene los roles actuales del perfil
+    let currentRoles = currentProfile.data().role || [];
+
+    // Verifica si profileIsAdmin o profileIsTrainer son true en el formData
+    const isAdmin = formData.profileIsAdmin === true;
+    const isTrainer = formData.profileIsTrainer === true;
+
+    // Elimina 'admin' del array de roles si isAdmin es false y está en el array
+    if (!isAdmin && currentRoles.includes('admin')) {
+      currentRoles = currentRoles.filter((role) => role !== 'admin');
+    }
+
+    // Elimina 'trainer' del array de roles si isTrainer es false y está en el array
+    if (!isTrainer && currentRoles.includes('trainer')) {
+      currentRoles = currentRoles.filter((role) => role !== 'trainer');
+    }
+
+    // Agrega 'admin' al array de roles si isAdmin es true y aún no está en el array
+    if (isAdmin && !currentRoles.includes('admin')) {
+      currentRoles.push('admin');
+    }
+
+    // Agrega 'trainer' al array de roles si isTrainer es true y aún no está en el array
+    if (isTrainer && !currentRoles.includes('trainer')) {
+      currentRoles.push('trainer');
+    }
+
+    // Si ni isAdmin ni isTrainer son true, y el array de roles está vacío, devuelve un error
+    if (!isAdmin && !isTrainer && currentRoles.length === 0) {
+      return res
+        .status(400)
+        .json({ error: 'Cannot leave a person without a role' });
+    }
+
+    // Actualiza el documento con los datos proporcionados en formData
+    await profileRef.update({
+      ...formData,
+      role: currentRoles,
+      profileIsAdmin: isAdmin,
+      profileIsTrainer: isTrainer,
+    });
 
     res.json({ message: 'Profile record updated successfully', formData });
   } catch (error) {
@@ -590,6 +632,7 @@ const unfreezeMembership = async (req, res) => {
       profileUnFreezeFee,
       profileUnFreezeDays,
       profileFrozenReason,
+      profileUnfreezeExpirationDate,
     } = req.body;
 
     const profileSnapshot = await db
@@ -598,7 +641,7 @@ const unfreezeMembership = async (req, res) => {
       .get();
     // Obtiene el membershipId del documento del perfil
     const { membershipId } = profileSnapshot.data();
-
+    console.log(profileUnfreezeExpirationDate);
     // Actualiza los campos en el perfil seleccionado para descongelar la membresía y establece las fechas de descongelación
     await db.collection('profiles').doc(profileId).update({
       profileFrozen: false, // Establece profileFrozen en false para descongelar
@@ -609,6 +652,7 @@ const unfreezeMembership = async (req, res) => {
       profileFrozenReason: profileFrozenReason,
       profileStatus: true,
       profileUnFrozen: true,
+      profileEndDate: profileUnfreezeExpirationDate,
     });
 
     const paymentHistoryRef = db.collection('paymentHistory');
@@ -619,6 +663,7 @@ const unfreezeMembership = async (req, res) => {
       paymentId: paymentId,
       profileId: profileId,
       gymId: gymId,
+      profileNewExpirationDate: profileUnfreezeExpirationDate,
       paymentStartDate: profileUnfreezeStartDate,
       paymentDate: new Date().toISOString().slice(0, 10),
       paymentType: 'UnFreeze',
@@ -823,7 +868,7 @@ const getProfileByName = async (req, res) => {
 
       const nameSnapshot = await profilesRef
         .where('gymId', '==', gymId) // Filtrar por gymId
-        .where('role', '==', 'member')
+        .where('role', 'array-contains', 'member')
         .where('profileName', '==', `${firstName} ${lastName}`)
         .get();
 
@@ -833,7 +878,7 @@ const getProfileByName = async (req, res) => {
 
       const lastNameSnapshot = await profilesRef
         .where('gymId', '==', gymId) // Filtrar por gymId
-        .where('role', '==', 'member')
+        .where('role', 'array-contains', 'member')
         .where('profileLastname', '==', lastName)
         .get();
 
@@ -844,7 +889,7 @@ const getProfileByName = async (req, res) => {
       // Si no hay espacio, buscar coincidencias en profileName y profileLastName
       const snapshot = await profilesRef
         .where('gymId', '==', gymId) // Filtrar por gymId
-        .where('role', '==', 'member')
+        .where('role', 'array-contains', 'member')
         .where('profileName', '>=', partialName)
         .where('profileName', '<=', partialName + '\uf8ff')
         .get();
@@ -918,7 +963,7 @@ const searchByCardNumber = async (req, res) => {
 
     const snapshot = await profilesRef
       .where('gymId', '==', gymId) // Filtrar por gymId
-      .where('role', '==', 'member')
+      .where('role', 'array-contains', 'member')
       .where('cardSerialNumber', '==', searchTerm) // Operador de rango// Operador de rango
       .get();
 
@@ -960,7 +1005,7 @@ const searchProfile = async (req, res) => {
 
       const nameSnapshot = await profilesRef
         .where('gymId', '==', gymId)
-        .where('role', '==', 'member')
+        .where('role', 'array-contains', 'member')
         .where('profileName', '==', `${firstName} ${lastName}`)
         .get();
 
@@ -970,7 +1015,7 @@ const searchProfile = async (req, res) => {
 
       const lastNameSnapshot = await profilesRef
         .where('gymId', '==', gymId)
-        .where('role', '==', 'member')
+        .where('role', 'array-contains', 'member')
         .where('profileLastname', '==', lastName)
         .get();
 
@@ -980,7 +1025,7 @@ const searchProfile = async (req, res) => {
     } else {
       const snapshot = await profilesRef
         .where('gymId', '==', gymId)
-        .where('role', '==', 'member')
+        .where('role', 'array-contains', 'member')
         .where('profileName', '>=', searchTerm)
         .where('profileName', '<=', searchTerm + '\uf8ff')
         .get();

@@ -10,7 +10,7 @@ const worksheet = workbook.addWorksheet('Profiles');
 
 profilesRef
   .where('gymId', '==', gymIdToFilter)
-  .where('role', '==', roleToFilter)
+  .where('role', 'array-contains', roleToFilter)
   .where('renewMembershipInQueue.renewIsInQueue', '==', true) // Nueva condición
   .get()
   .then((snapshot) => {

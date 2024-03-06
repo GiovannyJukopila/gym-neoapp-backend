@@ -13,6 +13,7 @@ const dashboardRouter = require('./dashboard.router');
 const reportsRouter = require('./reports.router');
 const financialRouter = require('./financial.router');
 const adminsRouter = require('./admins.router');
+const courtsRouter = require('./courts.router');
 
 const router = express.Router();
 //app.use('/api/v1', router);
@@ -29,5 +30,6 @@ router.use('/guests', guestsRouter);
 router.use('/dashboard', dashboardRouter);
 router.use('/reports', reportsRouter);
 router.use('/financial', financialRouter);
+router.use('/courts', courtsRouter);
 
 module.exports = router;

@@ -155,7 +155,12 @@ const getlogIn = async (req, res) => {
         secretKey
       );
 
-      if (profileData.profileIsAdmin || profileData.role === 'trainer') {
+      if (
+        profileData.profileIsAdmin ||
+        (profileData.role &&
+          profileData.role.length === 1 &&
+          profileData.role[0] === 'trainer')
+      ) {
         // const currentDate = new Date();
         // const passwordCreationDate = new Date(profileData.passwordCreationDate);
         // const daysDifference = Math.floor(

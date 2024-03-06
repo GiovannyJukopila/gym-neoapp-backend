@@ -28,7 +28,7 @@ const getTotalMembers = async (req, res) => {
     const totalMembersSnapshot = await db
       .collection('profiles')
       .where('gymId', '==', gymId)
-      .where('role', '==', 'member')
+      .where('role', 'array-contains', 'member')
       .get();
     const totalMembers = [];
     totalMembersSnapshot.forEach((doc) => {
@@ -39,7 +39,7 @@ const getTotalMembers = async (req, res) => {
     const lastMonthMembersSnapshot = await db
       .collection('profiles')
       .where('gymId', '==', gymId)
-      .where('role', '==', 'member')
+      .where('role', 'array-contains', 'member')
       .where('profileStartDate', '>=', lastMonthDateStr)
       .get();
     const lastMonthMembers = [];
@@ -51,7 +51,7 @@ const getTotalMembers = async (req, res) => {
     const lastWeekMembersSnapshot = await db
       .collection('profiles')
       .where('gymId', '==', gymId)
-      .where('role', '==', 'member')
+      .where('role', 'array-contains', 'member')
       .where('profileStartDate', '>=', lastWeekDateStr)
       .get();
     const lastWeekMembers = [];
@@ -533,7 +533,7 @@ const setInactiveMembers = async (req, res) => {
       .firestore()
       .collection('profiles')
       .where('gymId', '==', gymId)
-      .where('role', '==', 'member')
+      .where('role', 'array-contains', 'member')
       .get();
 
     const batch = admin.firestore().batch();

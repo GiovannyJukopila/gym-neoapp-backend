@@ -8,7 +8,7 @@ const admin = require('firebase-admin');
     .firestore()
     .collection('profiles')
     .where('gymId', '==', gymId)
-    .where('role', '==', 'member')
+    .where('role', 'array-contains', 'member')
     .get();
 
   const batch = admin.firestore().batch();

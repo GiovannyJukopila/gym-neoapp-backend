@@ -34,6 +34,7 @@ const createAdmin = async (req, res) => {
         gymId: req.body.gymId,
         profileStartDate: req.body.profileStartDate,
         profileIsAdmin: req.body.profileIsAdmin,
+        profileIsTrainer: req.body.profileIsTrainer,
         profileAdminLevel: req.body.profileAdminLevel,
         profileName: req.body.profileName,
         profileLastname: req.body.profileLastname,
@@ -51,8 +52,9 @@ const createAdmin = async (req, res) => {
         profileAddress: req.body.profileAddress,
         profileCity: req.body.profileCity,
         profileCountry: req.body.profileCountry,
-        role: 'admin',
+        role: req.body.profileIsTrainer ? ['admin', 'trainer'] : ['admin'],
         permissions: req.body.permissions,
+        profileIsTrainer: req.body.profileIsTrainer,
       };
 
       // Crea el nuevo perfil
@@ -82,7 +84,7 @@ const getAdmins = async (req, res) => {
     // Agrega una cláusula where para filtrar por gymId
     const response = await getProfilesCollection
       .where('gymId', '==', gymId) // Filtrar perfiles por gymId
-      .where('role', '==', 'admin')
+      .where('role', 'array-contains', 'admin')
       .limit(itemsPerPage)
       .offset(offset)
       .get();
@@ -125,6 +127,7 @@ const getAdmins = async (req, res) => {
         wasCheckIn: doc.data().wasCheckIn,
         role: doc.data().role,
         permissions: doc.data().permissions,
+        profileIsTrainer: doc.data().profileIsTrainer,
       };
 
       profileArray.push(profile);
@@ -160,7 +163,7 @@ const searchAdmin = async (req, res) => {
     const profilesRef = db.collection('profiles');
     const snapshot = await profilesRef
       .where('gymId', '==', gymId)
-      .where('role', '==', 'admin')
+      .where('role', 'array-contains', 'admin')
       .get();
 
     const profiles = [];
