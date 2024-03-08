@@ -1166,7 +1166,6 @@ const generateWalkinReport = async (req, res) => {
     if (sortBy === 'planName') {
       reportData.sort((a, b) => a.planName.localeCompare(b.planName));
     } else if (sortBy === 'cardSerialNumber') {
-      console.log('entro por aqui');
       reportData.sort((a, b) =>
         a.cardSerialNumber.localeCompare(b.cardSerialNumber)
       );

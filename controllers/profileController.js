@@ -641,7 +641,7 @@ const unfreezeMembership = async (req, res) => {
       .get();
     // Obtiene el membershipId del documento del perfil
     const { membershipId } = profileSnapshot.data();
-    console.log(profileUnfreezeExpirationDate);
+
     // Actualiza los campos en el perfil seleccionado para descongelar la membresía y establece las fechas de descongelación
     await db.collection('profiles').doc(profileId).update({
       profileFrozen: false, // Establece profileFrozen en false para descongelar

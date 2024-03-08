@@ -1,7 +1,7 @@
 const { db } = require('../firebase');
 const admin = require('firebase-admin');
 const profilesCollection = admin.firestore().collection('profiles');
-const gymIdToMigrate = 'gym-test';
+const gymIdToMigrate = 'marriot-1';
 
 async function migrateRoles() {
   const profilesSnapshot = await profilesCollection
