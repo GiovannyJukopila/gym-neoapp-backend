@@ -5,39 +5,276 @@ const bodyParser = require('body-parser');
 const admin = require('firebase-admin');
 app.use(bodyParser.json());
 
+// const createClass = async (req, res) => {
+//   try {
+//     const body = req.body;
+//     const gymId = req.query.gymId;
+
+//     console.log(body);
+//     // Genera el número secuencial utilizando la función
+//     const classSerialNumber = await generateSequentialNumber(gymId);
+
+//     // Genera el nombre del documento
+//     const documentName = `class-${gymId}-${classSerialNumber}`;
+//     body.classId = documentName;
+
+//     // Crea el nuevo documento en la colección "memberships" en Firebase
+//     const profilesCollection = db.collection('classes');
+//     const newProfileRef = profilesCollection.doc(documentName);
+//     await newProfileRef.set(body);
+
+//     const gymsCollection = db.collection('gyms');
+//     await gymsCollection.doc(gymId).update({
+//       classLastSerialNumber: documentName,
+//     });
+
+//     res.status(201).json({
+//       message: 'Membership created',
+//       documentName,
+//       body,
+//     });
+//   } catch (error) {
+//     console.error('Error creating membership:', error);
+//     res.status(500).json({
+//       message: 'An error occurred while creating the membership',
+//     });
+//   }
+// };
+
+// const createClass = async (req, res) => {
+//   try {
+//     const body = req.body;
+//     const gymId = req.query.gymId;
+
+//     const eventDate = new Date(body.eventDate);
+
+//     // Verificar si expirationDate es diferente de null
+//     if (body.expirationDate !== null) {
+//       const expirationDate = new Date(body.expirationDate);
+//       const personalClassId = `personal-class-${gymId}-${
+//         eventDate.toISOString().split('T')[0]
+//       }-${expirationDate.toISOString().split('T')[0]}`;
+//       // Crear un arreglo para almacenar las clases
+//       const classes = [];
+
+//       // Iterar sobre cada día entre eventDate y expirationDate
+//       const currentDate = new Date(eventDate);
+//       while (currentDate <= expirationDate) {
+//         // Verificar si el día actual es uno de los días seleccionados
+//         const dayOfWeek = currentDate.getDay(); // Domingo: 0, Lunes: 1, ..., Sábado: 6
+//         if (body.selectedWeekDays.includes(dayOfWeek)) {
+//           // Crear un objeto de clase para este día
+//           const classObj = {
+//             classId: `class-${gymId}-${
+//               currentDate.toISOString().split('T')[0]
+//             }`,
+//             gymId: gymId,
+//             personalClassId: personalClassId,
+//             eventDate: currentDate.toISOString(),
+//             className: body.className,
+//             startTime: body.startTime,
+//             endTime: body.endTime,
+//             repeatDaily: body.repeatDaily,
+//             eventColor: body.eventColor,
+//             weekDays: Array.from({ length: 7 }, (_, i) => i === dayOfWeek),
+//             expirationDate: body.expirationDate,
+//             selectTrainer: body.selectTrainer,
+//             limitCapacity: body.limitCapacity,
+//             classCapacity: body.classCapacity,
+//             description: body.description,
+//             selectedWeekDays: [dayOfWeek], // Se establece el día de la semana correspondiente
+//             // Agrega aquí otros elementos específicos para cada clase
+//             // ...
+//           };
+
+//           // Agregar la clase al arreglo de clases
+//           classes.push(classObj);
+//         }
+
+//         // Incrementar la fecha para el próximo día
+//         currentDate.setDate(currentDate.getDate() + 1);
+//       }
+
+//       // Guardar todas las clases en la base de datos
+//       const profilesCollection = db.collection('classes');
+//       const batch = db.batch();
+//       classes.forEach((classObj) => {
+//         const classRef = profilesCollection.doc(classObj.classId);
+//         batch.set(classRef, classObj);
+//       });
+//       await batch.commit();
+
+//       res.status(201).json({
+//         message: 'Classes created successfully',
+//         classes: classes,
+//       });
+//     } else {
+//       // Si expirationDate es null, crear una sola clase
+//       const classSerialNumber = await generateSequentialNumber(gymId);
+//       const documentName = `class-${gymId}-${classSerialNumber}`;
+//       body.classId = documentName;
+
+//       const profilesCollection = db.collection('classes');
+//       const newProfileRef = profilesCollection.doc(documentName);
+//       await newProfileRef.set(body);
+
+//       const gymsCollection = db.collection('gyms');
+//       await gymsCollection.doc(gymId).update({
+//         classLastSerialNumber: documentName,
+//       });
+
+//       res.status(201).json({
+//         message: 'Class created successfully',
+//         documentName,
+//         body,
+//       });
+//     }
+//   } catch (error) {
+//     console.error('Error creating classes:', error);
+//     res.status(500).json({
+//       message: 'An error occurred while creating the classes',
+//     });
+//   }
+// };
+
 const createClass = async (req, res) => {
   try {
     const body = req.body;
     const gymId = req.query.gymId;
-    // Genera el número secuencial utilizando la función
-    const classSerialNumber = await generateSequentialNumber(gymId);
 
-    // Genera el nombre del documento
-    const documentName = `class-${gymId}-${classSerialNumber}`;
-    body.classId = documentName;
+    const eventDate = new Date(body.eventDate);
 
-    // Crea el nuevo documento en la colección "memberships" en Firebase
-    const profilesCollection = db.collection('classes');
-    const newProfileRef = profilesCollection.doc(documentName);
-    await newProfileRef.set(body);
+    // Verificar si expirationDate es diferente de null
+    if (body.expirationDate !== null) {
+      const expirationDate = new Date(body.expirationDate);
+      const gymClassSerialNumber = await generateSequentialNumber(gymId);
+      const personalClassId = `personal-class-${gymId}-${gymClassSerialNumber}-${
+        eventDate.toISOString().split('T')[0]
+      }-${expirationDate.toISOString().split('T')[0]}`;
+      // Crear un arreglo para almacenar las clases
+      const classes = [];
 
-    const gymsCollection = db.collection('gyms');
-    await gymsCollection.doc(gymId).update({
-      classLastSerialNumber: documentName,
-    });
+      // Iterar sobre cada día entre eventDate y expirationDate
+      const currentDate = new Date(eventDate);
+      while (currentDate <= expirationDate) {
+        // Verificar si el día actual es uno de los días seleccionados
+        const dayOfWeek = currentDate.getDay(); // Domingo: 0, Lunes: 1, ..., Sábado: 6
+        if (body.selectedWeekDays.includes(dayOfWeek)) {
+          // Generar el número secuencial utilizando la función
+          const classSerialNumber = await generateSequentialNumber(gymId);
 
-    res.status(201).json({
-      message: 'Membership created',
-      documentName,
-      body,
-    });
+          // Generar el nombre del documento
+          const classId = `class-${gymId}-${classSerialNumber}`;
+
+          // Crear un objeto de clase para este día
+          const classObj = {
+            classId: classId,
+            gymId: gymId,
+            personalClassId: personalClassId,
+            eventDate: currentDate.toISOString(),
+            className: body.className,
+            startTime: body.startTime,
+            endTime: body.endTime,
+            repeatDaily: body.repeatDaily,
+            eventColor: body.eventColor,
+            weekDays: Array.from({ length: 7 }, (_, i) => i === dayOfWeek),
+            expirationDate: body.expirationDate,
+            selectTrainer: body.selectTrainer,
+            limitCapacity: body.limitCapacity,
+            classCapacity: body.classCapacity,
+            description: body.description,
+            selectedWeekDays: [dayOfWeek], // Se establece el día de la semana correspondiente
+            // Agregar aquí otros elementos específicos para cada clase
+            // ...
+          };
+
+          // Agregar la clase al arreglo de clases
+          classes.push(classObj);
+        }
+
+        // Incrementar la fecha para el próximo día
+        currentDate.setDate(currentDate.getDate() + 1);
+      }
+
+      // Crear clase para el día de expiración
+      const expirationDayOfWeek = expirationDate.getDay();
+      if (body.selectedWeekDays.includes(expirationDayOfWeek)) {
+        // Generar el número secuencial utilizando la función
+        const expirationClassSerialNumber = await generateSequentialNumber(
+          gymId
+        );
+
+        // Generar el nombre del documento para la clase de expiración
+        const expirationClassId = `class-${gymId}-${expirationClassSerialNumber}`;
+
+        const expirationClassObj = {
+          classId: expirationClassId,
+          gymId: gymId,
+          personalClassId: personalClassId,
+          eventDate: expirationDate.toISOString(),
+          className: body.className,
+          startTime: body.startTime,
+          endTime: body.endTime,
+          repeatDaily: body.repeatDaily,
+          eventColor: body.eventColor,
+          weekDays: Array.from(
+            { length: 7 },
+            (_, i) => i === expirationDayOfWeek
+          ),
+          expirationDate: body.expirationDate,
+          selectTrainer: body.selectTrainer,
+          limitCapacity: body.limitCapacity,
+          classCapacity: body.classCapacity,
+          description: body.description,
+          selectedWeekDays: [expirationDayOfWeek], // Se establece el día de la semana correspondiente
+          // Agregar aquí otros elementos específicos para la clase de expiración
+          // ...
+        };
+        classes.push(expirationClassObj);
+      }
+
+      // Guardar todas las clases en la base de datos
+      const profilesCollection = db.collection('classes');
+      const batch = db.batch();
+      classes.forEach((classObj) => {
+        const classRef = profilesCollection.doc(classObj.classId);
+        batch.set(classRef, classObj);
+      });
+      await batch.commit();
+
+      res.status(201).json({
+        message: 'Classes created successfully',
+        classes: classes,
+      });
+    } else {
+      // Si expirationDate es null, crear una sola clase
+      const classSerialNumber = await generateSequentialNumber(gymId);
+      const documentName = `class-${gymId}-${classSerialNumber}`;
+      body.classId = documentName;
+
+      const profilesCollection = db.collection('classes');
+      const newProfileRef = profilesCollection.doc(documentName);
+      await newProfileRef.set(body);
+
+      const gymsCollection = db.collection('gyms');
+      await gymsCollection.doc(gymId).update({
+        classLastSerialNumber: documentName,
+      });
+
+      res.status(201).json({
+        message: 'Class created successfully',
+        documentName,
+        body,
+      });
+    }
   } catch (error) {
-    console.error('Error creating membership:', error);
+    console.error('Error creating classes:', error);
     res.status(500).json({
-      message: 'An error occurred while creating the membership',
+      message: 'An error occurred while creating the classes',
     });
   }
 };
+
 async function generateSequentialNumber(gymId) {
   // Consulta la colección "metadata" para obtener el último número secuencial
   const metadataRef = db.collection('gyms').doc(gymId);
@@ -96,6 +333,7 @@ const getAllClasses = async (req, res) => {
         participants: data?.participants,
         currentClassParticipants: data?.currentClassParticipants,
         classesCancelled: data?.classesCancelled,
+        personalClassId: data?.personalClassId,
       };
       classesArray.push(membership);
     });
@@ -105,6 +343,97 @@ const getAllClasses = async (req, res) => {
   } catch (error) {
     console.error('Error en getAllProfiles:', error);
     res.status(500).send(error);
+  }
+};
+
+// const deleteAllClasses = async (req, res) => {
+//   try {
+//     const gymId = req.body.gymId; // Obtiene el gymId de los parámetros de la URL
+//     const personalClassId = req.params.personalClassId; // Obtiene el personalClassId de los parámetros de la URL
+
+//     console.log(gymId, personalClassId);
+//     const classesCollection = db.collection('classes');
+//     const querySnapshot = await classesCollection
+//       .where('gymId', '==', gymId)
+//       .where('personalClassId', '==', personalClassId)
+//       .get();
+
+//     const batch = db.batch();
+//     querySnapshot.forEach((doc) => {
+//       batch.delete(doc.ref);
+//     });
+
+//     await batch.commit();
+
+//     console.log(
+//       'Classes associated with personalClassId',
+//       personalClassId,
+//       'deleted successfully'
+//     );
+
+//     res.status(200).json({
+//       message: `Classes associated with personalClassId ${personalClassId} deleted successfully`,
+//     });
+//   } catch (error) {
+//     console.error('Error deleting classes:', error);
+//     res.status(500).json({
+//       message: 'An error occurred while deleting the classes',
+//     });
+//   }
+// };
+const deleteAllClasses = async (req, res) => {
+  try {
+    const gymId = req.body.gymId; // Obtiene el gymId del cuerpo de la solicitud
+    const personalClassId = req.params.personalClassId; // Obtiene el personalClassId de los parámetros de la URL
+
+    // Obtener todas las clases asociadas con el personalClassId
+    const classesSnapshot = await db
+      .collection('classes')
+      .where('gymId', '==', gymId)
+      .where('personalClassId', '==', personalClassId)
+      .get();
+
+    const failedClasses = []; // Almacenar las clases que no se pueden eliminar
+
+    const batch = db.batch();
+    classesSnapshot.forEach((classDoc) => {
+      const classData = classDoc.data();
+      // Verificar si la clase tiene participantes
+      if (classData.participants && classData.participants.length > 0) {
+        // La clase tiene participantes, por lo que no se puede eliminar
+        failedClasses.push({
+          eventDate: classData.eventDate, // Guardar la fecha de la clase que no se puede eliminar
+        });
+      } else {
+        // La clase no tiene participantes, se puede eliminar
+        batch.delete(classDoc.ref);
+      }
+    });
+
+    await batch.commit();
+
+    if (failedClasses.length > 0) {
+      // Devolver las clases que no se pudieron eliminar debido a que tienen participantes
+      res.status(400).json({
+        message: `Some classes associated with personalClassId ${personalClassId} have participants and cannot be deleted`,
+        failedClasses: failedClasses,
+      });
+    } else {
+      // Todas las clases se eliminaron correctamente
+      console.log(
+        'Classes associated with personalClassId',
+        personalClassId,
+        'deleted successfully'
+      );
+      res.status(200).json({
+        message: `Classes associated with personalClassId ${personalClassId} deleted successfully`,
+      });
+    }
+  } catch (error) {
+    console.error('Error deleting classes:', error);
+    res.status(500).json({
+      message: 'An error occurred while deleting the classes',
+    });
   }
 };
 
@@ -310,6 +639,7 @@ module.exports = {
   createClass,
   getAllClasses,
   deleteClass,
+  deleteAllClasses,
   updateClass,
   getTrainers,
   addParticipants,

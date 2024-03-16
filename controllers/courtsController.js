@@ -180,14 +180,22 @@ const createSession = async (req, res) => {
 
     const courtSelected = db.collection('courts').doc(body.selectCourt);
     const courtSnapshot = await courtSelected.get();
+    const courtName = courtSnapshot.get('courtName');
+
+    body.courtName = courtName;
+
     const maxBookingPerDay = courtSnapshot.get('maxBookingPerDay');
     const maxBookingPerWeek = courtSnapshot.get('maxBookingPerWeek');
     const feeIsActive = courtSnapshot.get('bookingFee');
-
+    const eventDate = new Date(body.eventDate).toISOString().split('T')[0];
     // Validar si maxBookingPerDay y maxBookingPerWeek son diferentes de null
-    if (maxBookingPerDay !== null && maxBookingPerWeek !== null) {
+    if (
+      maxBookingPerDay !== null &&
+      maxBookingPerDay !== 0 &&
+      maxBookingPerWeek !== null &&
+      maxBookingPerWeek !== 0
+    ) {
       // Obtener la fecha actual en formato YYYY-MM-DD
-      const eventDate = new Date(body.eventDate).toISOString().split('T')[0];
 
       // Consultar la colección paymentsHistory filtrando por la fecha del evento y el courtId seleccionado
       const paymentsSnapshotDay = await db
@@ -244,6 +252,48 @@ const createSession = async (req, res) => {
         });
       }
       // Resto del código...
+    }
+
+    const timeToMinutes = (time) => {
+      const [hours, minutes] = time.split(':').map(Number);
+      return hours * 60 + minutes;
+    };
+
+    const overlappingSessions = await db
+      .collection('sessionHistory')
+      .where('gymId', '==', gymId)
+      .where('createDate', '==', eventDate)
+      .where('selectCourt', '==', body.selectCourt)
+      .get();
+
+    // Verificar si hay superposiciones de horarios
+    const conflict = overlappingSessions.docs.some((doc) => {
+      const existingStartTime = doc.data().startTime;
+      const existingEndTime = doc.data().endTime;
+
+      // Convertir horas a minutos para facilitar la comparación
+      const existingStartMinutes = timeToMinutes(existingStartTime);
+      const existingEndMinutes = timeToMinutes(existingEndTime);
+      const bodyStartMinutes = timeToMinutes(body.startTime);
+      const bodyEndMinutes = timeToMinutes(body.endTime);
+
+      return (
+        (existingStartMinutes <= bodyStartMinutes &&
+          bodyStartMinutes < existingEndMinutes) ||
+        (existingStartMinutes < bodyEndMinutes &&
+          bodyEndMinutes <= existingEndMinutes) ||
+        (bodyStartMinutes <= existingStartMinutes &&
+          existingStartMinutes < bodyEndMinutes) ||
+        (bodyStartMinutes < existingEndMinutes &&
+          existingEndMinutes <= bodyEndMinutes)
+      );
+    });
+
+    if (conflict) {
+      return res.status(400).json({
+        error:
+          'There is already a scheduled session with overlapping schedules on this day for the same court',
+      });
     }
 
     // Crea el nuevo documento en la colección "memberships" en Firebase
@@ -349,6 +399,7 @@ const getallSession = async (req, res) => {
         startTime: data.startTime,
         eventColor: data.eventColor,
         createDate: data.createDate,
+        courtName: data.courtName,
       };
       sessionsArray.push(membership);
     });

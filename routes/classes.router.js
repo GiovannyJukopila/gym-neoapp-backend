@@ -7,6 +7,7 @@ const {
   createClass,
   updateClass,
   deleteClass,
+  deleteAllClasses,
   removeParticipant,
   cancelClass,
 } = require('../controllers/classController');
@@ -30,5 +31,11 @@ router.post('/cancelClass', verifyToken, cancelClass);
 router.post('/removeParticipant', verifyToken, removeParticipant);
 
 router.delete('/delete/:classId', verifyToken, deleteClass);
+
+router.delete(
+  '/deleteAllClasses/:personalClassId',
+  verifyToken,
+  deleteAllClasses
+);
 
 module.exports = router;
