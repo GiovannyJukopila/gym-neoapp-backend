@@ -266,6 +266,8 @@ const createSession = async (req, res) => {
       .where('selectCourt', '==', body.selectCourt)
       .get();
 
+    console.log(overlappingSessions);
+
     // Verificar si hay superposiciones de horarios
     const conflict = overlappingSessions.docs.some((doc) => {
       const existingStartTime = doc.data().startTime;
