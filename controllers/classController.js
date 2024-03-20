@@ -246,6 +246,64 @@ const createClass = async (req, res) => {
         message: 'Classes created successfully',
         classes: classes,
       });
+    } else if (body.selectedWeekDays && body.selectedWeekDays.length > 0) {
+      // Si no hay expirationDate pero hay días seleccionados, creamos clases para esos días
+
+      // Generar el número secuencial utilizando la función
+      const gymClassSerialNumber = await generateSequentialNumber(gymId);
+      const personalClassId = `personal-class-${gymId}-${gymClassSerialNumber}-${
+        eventDate.toISOString().split('T')[0]
+      }`;
+
+      // Crear un arreglo para almacenar las clases
+      const classes = [];
+
+      // Iterar sobre cada día seleccionado en body.selectedWeekDays
+      for (const dayOfWeek of body.selectedWeekDays) {
+        // Generar el número secuencial utilizando la función
+        const classSerialNumber = await generateSequentialNumber(gymId);
+
+        // Generar el nombre del documento
+        const classId = `class-${gymId}-${classSerialNumber}`;
+
+        // Crear un objeto de clase para este día
+        const classObj = {
+          classId: classId,
+          gymId: gymId,
+          personalClassId: personalClassId,
+          eventDate: eventDate.toISOString(),
+          className: body.className,
+          startTime: body.startTime,
+          endTime: body.endTime,
+          repeatDaily: body.repeatDaily,
+          eventColor: body.eventColor,
+          weekDays: Array.from({ length: 7 }, (_, i) => i === dayOfWeek),
+          selectTrainer: body.selectTrainer,
+          limitCapacity: body.limitCapacity,
+          classCapacity: body.classCapacity,
+          description: body.description,
+          selectedWeekDays: [dayOfWeek], // Se establece el día de la semana correspondiente
+          // Agregar aquí otros elementos específicos para cada clase
+          // ...
+        };
+
+        // Agregar la clase al arreglo de clases
+        classes.push(classObj);
+      }
+
+      // Guardar todas las clases en la base de datos
+      const profilesCollection = db.collection('classes');
+      const batch = db.batch();
+      classes.forEach((classObj) => {
+        const classRef = profilesCollection.doc(classObj.classId);
+        batch.set(classRef, classObj);
+      });
+      await batch.commit();
+
+      res.status(201).json({
+        message: 'Classes created successfully',
+        classes: classes,
+      });
     } else {
       // Si expirationDate es null, crear una sola clase
       const classSerialNumber = await generateSequentialNumber(gymId);

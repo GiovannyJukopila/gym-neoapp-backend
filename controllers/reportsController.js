@@ -1107,6 +1107,446 @@ const generateInactiveMembersReport = async (req, res) => {
   }
 };
 
+const generateDnaReport = async (req, res) => {
+  try {
+    const { gymId } = req.params;
+    const { profileId } = req.body;
+    const doc = new PDFDocument();
+
+    res.setHeader(
+      'Content-Disposition',
+      'attachment; filename="Dna_report.pdf"'
+    );
+    doc.pipe(res);
+
+    // Título del informe
+    doc.rect(0, 0, 612, 80).fill('#FFA500');
+    doc.fontSize(25).fill('white').text('DNA REPORT - SUMMARY ', 50, 30, {
+      align: 'left',
+      valign: 'center',
+    });
+
+    const gymSnapshot = await admin
+      .firestore()
+      .collection('gyms')
+      .doc(gymId)
+      .get();
+    const gymData = gymSnapshot.data();
+    const gymTimeZone = gymData.gymTimeZone;
+    const utcOffset = getUtcOffset(gymTimeZone);
+
+    const utcDate = new Date();
+    const localTimeInMilliseconds = utcDate.getTime() - utcOffset * 60 * 1000;
+
+    const currentDate = new Date(localTimeInMilliseconds);
+    currentDate.setUTCHours(0, 0, 0, 0);
+
+    const dateString = currentDate.toISOString().split('T')[0];
+
+    // Agregar el título del informe
+    doc.fontSize(18).text(`${dateString}`, { bold: true }).moveDown(1);
+
+    // Obtener datos del perfil
+    const profileSnapshot = await admin
+      .firestore()
+      .collection('profiles')
+      .doc(profileId)
+      .get();
+    const profileData = profileSnapshot.data();
+
+    // Obtener el ID de la membresía actual
+    const name = profileData.profileName + ' ' + profileData.profileLastname;
+    const membershipId = profileData.membershipId;
+    const cardSerialNumber = profileData.cardSerialNumber;
+
+    // Obtener datos de la membresía actual
+    const membershipSnapshot = await admin
+      .firestore()
+      .collection('memberships')
+      .doc(membershipId)
+      .get();
+    const membershipData = membershipSnapshot.data();
+
+    // Obtener el tipo de membresía actual y la fecha de vencimiento
+    const currentMembershipType = membershipData.planName;
+    const expirationDate = profileData.profileEndDate;
+
+    const paymentSnapshot = await admin
+      .firestore()
+      .collection('paymentHistory')
+      .where('profileId', '==', profileId)
+      .where('paymentType', '==', 'new')
+      .get();
+
+    let memberSinceDate = null;
+    if (!paymentSnapshot.empty) {
+      const oldestPayment = paymentSnapshot.docs[0].data();
+      memberSinceDate =
+        oldestPayment.paymentDate || oldestPayment.paymentStartDate;
+    }
+
+    const renewalSnapshot = await admin
+      .firestore()
+      .collection('paymentHistory')
+      .where('profileId', '==', profileId)
+      .where('paymentType', '==', 'renew')
+      .get();
+
+    const numberOfRenewals = renewalSnapshot.docs.length;
+
+    const accessSnapshot = await admin
+      .firestore()
+      .collection('accessHistory')
+      .where('profileId', '==', profileId)
+      .where('action', '==', 'check-in')
+      .get();
+
+    const numberOfVisitsSinceRenewal = accessSnapshot.docs.length;
+
+    const averageVisitTime = await calculateAverageVisitTime(profileId);
+    const averageHourVisitTime = await calculateAverageHourVisitTime(profileId);
+    const classParticipation = await calculateGroupClassParticipation(
+      profileId,
+      gymId
+    );
+    const courtsParticipation = await calculateCourtBookings(profileId, gymId);
+
+    const summaryTableData = [
+      ['Member Name', name],
+      ['Current Card Serial Number', cardSerialNumber],
+      ['Current Membership Type', currentMembershipType],
+      ['Expiration of Current Membership', expirationDate],
+      ['Member since', memberSinceDate],
+      ['Number of Renewal', numberOfRenewals],
+      ['Number of visits since inception', numberOfVisitsSinceRenewal],
+      [
+        'Average Morning Visit (Opening - 12:00 PM)',
+        `${averageVisitTime.morning}%`,
+      ],
+      [
+        'Average Afternoon Visit (12:00 PM - 6:00 PM)',
+        `${averageVisitTime.afternoon}%`,
+      ],
+      [
+        'Average Evening Visit (6:00 PM - Closing)',
+        `${averageVisitTime.evening}%`,
+      ],
+      ['Average time of morning visits', averageHourVisitTime.morning],
+      ['Average time of afternoon visits', averageHourVisitTime.afternoon],
+      ['Average time of evening visits', averageHourVisitTime.evening],
+      ['Group class participation', classParticipation],
+      ['Court bookings', courtsParticipation],
+    ];
+
+    // Configurar la tabla
+    const summaryTable = {
+      headers: ['Title', 'Value'],
+      rows: summaryTableData,
+    };
+
+    // Agregar la tabla al documento con estilos personalizados
+    doc.table(summaryTable, {
+      prepareHeader: () =>
+        doc.font('Helvetica-Bold').fontSize(10).fillColor('black'),
+      prepareRow: (row, indexColumn, indexRow) => {
+        doc.font('Helvetica').fontSize(10).fillColor('black');
+      },
+      borderHorizontalWidths: () => 1,
+      borderVerticalWidths: () => 1,
+      borderColor: () => 'black',
+      padding: 10,
+      margins: { top: 50, bottom: 50, left: 50, right: 50 },
+    });
+
+    // Agregar la tabla de pagos al documento con estilos personalizados
+
+    const paymentsTableData = await generatePaymentsTable(profileId);
+    const paymentsTable = {
+      headers: ['Date', 'Membership Type', 'Net Revenue', 'Payment Type'],
+      rows: [],
+    };
+
+    paymentsTableData.forEach((payment) => {
+      paymentsTable.rows.push(payment); // Agregar la fila completa
+    });
+
+    doc
+      .moveDown()
+      .font('Helvetica-Bold')
+      .fontSize(18) // Tamaño de fuente más grande
+      .text('Payments', { bold: true })
+      .moveDown(); // Espacio adicional después del título
+    doc.table(paymentsTable, {
+      prepareHeader: () =>
+        doc.font('Helvetica-Bold').fontSize(10).fillColor('black'),
+      prepareRow: (row, indexColumn, indexRow) => {
+        doc.font('Helvetica').fontSize(10).fillColor('black');
+      },
+      borderHorizontalWidths: () => 1,
+      borderVerticalWidths: () => 1,
+      borderColor: () => 'black',
+      padding: 10,
+      margins: { top: 20, bottom: 20, left: 50, right: 50 },
+    });
+
+    const checkInOutData = await getCheckInOutData(profileId);
+    const checkInOutTable = {
+      headers: ['Index', 'Date', 'Check-In', 'Check-Out'],
+      rows: checkInOutData.map((entry) => [
+        entry.index,
+        entry.date,
+        entry.checkIn || '',
+        entry.checkOut || `Didn't check-out`,
+      ]),
+    };
+
+    // Agregar la tabla de CheckIn/CheckOut al documento
+    doc
+      .moveDown()
+      .font('Helvetica-Bold')
+      .fontSize(18) // Tamaño de fuente más grande
+      .text('Check-In / Check-Out', { bold: true })
+      .moveDown();
+    doc.table(checkInOutTable, {
+      prepareHeader: () =>
+        doc.font('Helvetica-Bold').fontSize(10).fillColor('black'),
+      prepareRow: (row, indexColumn, indexRow) => {
+        doc.font('Helvetica').fontSize(10).fillColor('black');
+      },
+      borderHorizontalWidths: () => 1,
+      borderVerticalWidths: () => 1,
+      borderColor: () => 'black',
+      padding: 10,
+      margins: { top: 20, bottom: 20, left: 50, right: 50 },
+    });
+
+    doc.end();
+  } catch (error) {
+    console.error(error);
+    res.status(500).send('Error generating the report');
+  }
+};
+// Función para obtener los datos de CheckIn/CheckOut
+async function getCheckInOutData(profileId) {
+  const accessSnapshot = await admin
+    .firestore()
+    .collection('accessHistory')
+    .where('profileId', '==', profileId)
+    .where('action', 'in', ['check-in', 'check-out'])
+    .orderBy('timestamp')
+    .get();
+
+  const checkInOutData = [];
+
+  let index = 1; // Iniciamos el índice en 1
+
+  accessSnapshot.forEach((doc) => {
+    const accessData = doc.data();
+    const date = accessData.timestamp.toDate().toLocaleDateString();
+    const time = accessData.timestamp.toDate().toLocaleTimeString();
+
+    if (accessData.action === 'check-in') {
+      // Si es check-in, agregamos una nueva entrada
+      checkInOutData.push({ index, date, checkIn: time, checkOut: '' });
+      index++; // Incrementamos el índice
+    } else {
+      // Si es check-out, actualizamos la última entrada de check-in
+      if (checkInOutData.length > 0) {
+        const lastEntry = checkInOutData[checkInOutData.length - 1];
+        if (lastEntry.checkOut === '') {
+          lastEntry.checkOut = time;
+        }
+      }
+    }
+  });
+
+  return checkInOutData;
+}
+
+async function generatePaymentsTable(profileId) {
+  const paymentsTableData = [];
+
+  const paymentsSnapshot = await admin
+    .firestore()
+    .collection('paymentHistory')
+    .where('profileId', '==', profileId)
+    .get();
+
+  for (const doc of paymentsSnapshot.docs) {
+    const payment = doc.data();
+    let date = '';
+    if (payment.paymentDate) {
+      date = payment.paymentDate;
+    } else if (payment.paymentStartDate) {
+      date = payment.paymentStartDate;
+    }
+    const membershipType = await getMembershipType(payment.membershipId);
+    const netRevenue = `€ ${payment.paymentAmount}`;
+    const paymentType = payment.paymentType;
+    paymentsTableData.push([date, membershipType, netRevenue, paymentType]);
+  }
+
+  return paymentsTableData;
+}
+
+async function getMembershipType(membershipId) {
+  const membershipSnapshot = await admin
+    .firestore()
+    .collection('memberships')
+    .doc(membershipId)
+    .get();
+
+  return membershipSnapshot.exists
+    ? membershipSnapshot.data().planName
+    : 'Unknown';
+}
+
+async function calculateAverageVisitTime(profileId) {
+  let totalVisits = 0;
+  let morningVisits = 0;
+  let afternoonVisits = 0;
+  let eveningVisits = 0;
+
+  const accessSnapshot = await admin
+    .firestore()
+    .collection('accessHistory')
+    .where('profileId', '==', profileId)
+    .where('action', '==', 'check-in')
+    .get();
+
+  accessSnapshot.forEach((doc) => {
+    const timestamp = doc.data().timestamp.toDate();
+    const hours = timestamp.getHours();
+
+    if (hours >= 5 && hours < 12) {
+      morningVisits++;
+    } else if (hours >= 12 && hours < 18) {
+      afternoonVisits++;
+    } else {
+      eveningVisits++;
+    }
+
+    totalVisits++;
+  });
+
+  const morningPercentage = (morningVisits / totalVisits) * 100;
+  const afternoonPercentage = (afternoonVisits / totalVisits) * 100;
+  const eveningPercentage = (eveningVisits / totalVisits) * 100;
+
+  return {
+    morning: morningPercentage.toFixed(2),
+    afternoon: afternoonPercentage.toFixed(2),
+    evening: eveningPercentage.toFixed(2),
+  };
+}
+
+async function calculateAverageHourVisitTime(profileId) {
+  let totalMorningVisits = 0;
+  let totalAfternoonVisits = 0;
+  let totalEveningVisits = 0;
+  let morningTimeSum = 0;
+  let afternoonTimeSum = 0;
+  let eveningTimeSum = 0;
+
+  const accessSnapshot = await admin
+    .firestore()
+    .collection('accessHistory')
+    .where('profileId', '==', profileId)
+    .where('action', '==', 'check-in')
+    .get();
+
+  accessSnapshot.forEach((doc) => {
+    const timestamp = doc.data().timestamp.toDate();
+    const hours = timestamp.getHours();
+    const minutes = timestamp.getMinutes();
+    const timeInMinutes = hours * 60 + minutes;
+
+    if (hours >= 5 && hours < 12) {
+      morningTimeSum += timeInMinutes;
+      totalMorningVisits++;
+    } else if (hours >= 12 && hours < 18) {
+      afternoonTimeSum += timeInMinutes;
+      totalAfternoonVisits++;
+    } else {
+      eveningTimeSum += timeInMinutes;
+      totalEveningVisits++;
+    }
+  });
+
+  const calculateAverageTime = (timeSum, totalVisits) => {
+    if (totalVisits === 0) return 'No visits';
+
+    const averageTimeInMinutes = timeSum / totalVisits;
+    const averageHours = Math.floor(averageTimeInMinutes / 60);
+    const averageMinutes = Math.floor(averageTimeInMinutes % 60);
+    const period = averageHours < 12 ? 'AM' : 'PM';
+    const formattedHours = averageHours % 12 || 12; // Convertir horas a formato de 12 horas
+
+    return `${formattedHours}:${
+      averageMinutes < 10 ? '0' : ''
+    }${averageMinutes} ${period}`;
+  };
+
+  const morningAverageTime = calculateAverageTime(
+    morningTimeSum,
+    totalMorningVisits
+  );
+  const afternoonAverageTime = calculateAverageTime(
+    afternoonTimeSum,
+    totalAfternoonVisits
+  );
+  const eveningAverageTime = calculateAverageTime(
+    eveningTimeSum,
+    totalEveningVisits
+  );
+
+  return {
+    morning: morningAverageTime,
+    afternoon: afternoonAverageTime,
+    evening: eveningAverageTime,
+  };
+}
+async function calculateGroupClassParticipation(profileId, gymId) {
+  let totalParticipations = 0;
+
+  const classesSnapshot = await admin
+    .firestore()
+    .collection('classes')
+    .where('gymId', '==', gymId)
+    .get();
+
+  classesSnapshot.forEach((doc) => {
+    const classData = doc.data();
+    if (classData.participants && classData.participants.includes(profileId)) {
+      totalParticipations++;
+    }
+  });
+
+  return totalParticipations;
+}
+
+async function calculateCourtBookings(profileId, gymId) {
+  let totalBookings = 0;
+
+  const sessionsSnapshot = await admin
+    .firestore()
+    .collection('sessionHistory')
+    .where('gymId', '==', gymId)
+    .get();
+
+  sessionsSnapshot.forEach((doc) => {
+    const sessionData = doc.data();
+    if (
+      sessionData.participants &&
+      sessionData.participants.includes(profileId)
+    ) {
+      totalBookings++;
+    }
+  });
+
+  return totalBookings;
+}
+
 const generateWalkinReport = async (req, res) => {
   try {
     const { gymId } = req.params;
@@ -1240,5 +1680,6 @@ module.exports = {
   generateExpirationReport,
   generateActiveMembersReport,
   generateInactiveMembersReport,
+  generateDnaReport,
   generateWalkinReport,
 };
