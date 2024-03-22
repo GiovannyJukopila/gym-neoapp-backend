@@ -266,28 +266,32 @@ const createSession = async (req, res) => {
       .where('selectCourt', '==', body.selectCourt)
       .get();
 
-    console.log(overlappingSessions);
-
-    // Verificar si hay superposiciones de horarios
     const conflict = overlappingSessions.docs.some((doc) => {
       const existingStartTime = doc.data().startTime;
       const existingEndTime = doc.data().endTime;
 
-      // Convertir horas a minutos para facilitar la comparación
       const existingStartMinutes = timeToMinutes(existingStartTime);
       const existingEndMinutes = timeToMinutes(existingEndTime);
       const bodyStartMinutes = timeToMinutes(body.startTime);
       const bodyEndMinutes = timeToMinutes(body.endTime);
 
+      // Verificar si hay superposiciones de horarios
       return (
-        (existingStartMinutes <= bodyStartMinutes &&
-          bodyStartMinutes < existingEndMinutes) ||
-        (existingStartMinutes < bodyEndMinutes &&
+        // Caso 1: La nueva sesión comienza antes y termina durante una sesión existente
+        (bodyStartMinutes < existingStartMinutes &&
+          bodyEndMinutes > existingStartMinutes &&
           bodyEndMinutes <= existingEndMinutes) ||
-        (bodyStartMinutes <= existingStartMinutes &&
-          existingStartMinutes < bodyEndMinutes) ||
-        (bodyStartMinutes < existingEndMinutes &&
-          existingEndMinutes <= bodyEndMinutes)
+        // Caso 2: La nueva sesión comienza durante y termina durante una sesión existente
+        (bodyStartMinutes >= existingStartMinutes &&
+          bodyStartMinutes < existingEndMinutes &&
+          bodyEndMinutes <= existingEndMinutes) ||
+        // Caso 3: La nueva sesión comienza durante una sesión existente y termina después
+        (bodyStartMinutes >= existingStartMinutes &&
+          bodyStartMinutes < existingEndMinutes &&
+          bodyEndMinutes > existingEndMinutes) ||
+        // Caso 4: La nueva sesión comienza antes y termina después de una sesión existente
+        (bodyStartMinutes < existingStartMinutes &&
+          bodyEndMinutes > existingEndMinutes)
       );
     });
 
