@@ -22,9 +22,9 @@ const transporter = nodemailer.createTransport({
 
 function buildCustomEmailContent(subject, content, image, reason) {
   // Agrega una imagen si se proporciona la URL de la imagen
-  const imageTag = image
-    ? `<img src="${image}" alt="Image" style="max-width: 100%; height: auto;" />`
-    : '';
+  // const imageTag = image
+  //   ? `<img src="${image}" alt="Image" style="max-width: 100%; height: auto;" />`
+  //   : '';
   const button =
     reason === 'setup_password'
       ? `<a href="https://neoappgym.com/setup-password" class="button">Set Up Password</a>`
@@ -94,7 +94,7 @@ function buildCustomEmailContent(subject, content, image, reason) {
             </div>
             <div class="subcard">
             <div class="content">
-                ${imageTag}
+
                 <p>${content}</p>
                 ${button}
 
@@ -137,13 +137,34 @@ async function getMemberEmailsByGymId(gymId) {
 }
 
 // Función para enviar un correo personalizado
-async function sendCustomEmail(recipient, subject, emailContent, image) {
+async function sendCustomEmail(
+  recipient,
+  subject,
+  emailContent,
+  attachmentName,
+  attachmentType,
+  attachmentContent
+) {
   try {
+    const attachments = [];
+
+    // Verificar si attachmentContent tiene un valor
+    if (attachmentContent) {
+      const base64Content = attachmentContent.split(';base64,').pop();
+      attachments.push({
+        filename: attachmentName,
+        content: base64Content,
+        encoding: 'base64',
+        contentType: attachmentType, // Agregar el tipo MIME del archivo adjunto
+      });
+    }
+
     const info = await transporter.sendMail({
       from: '"No Reply - NeoApp" <goneoapp@gmail.com>',
       bcc: recipient,
       subject: subject,
-      html: emailContent, // Usar el contenido HTML generado
+      html: emailContent,
+      attachments: attachments, // Adjuntar solo si attachmentContent tiene un valor
     });
   } catch (error) {
     console.error('Error sending email to ' + recipient + ':', error);
@@ -155,10 +176,42 @@ const getNotification = async (req, res) => {
   try {
     const { subject, content, image, recipient, reason, isForAll, gymId } =
       req.body;
+    let attachmentName = 'attachment';
+    let attachmentType = 'application/octet-stream';
 
     // Nombre del archivo adjunto
     const imageFileName = 'image.png';
+    if (image) {
+      const mimeTypeDelimiterIndex = image.indexOf(';base64,');
+      if (mimeTypeDelimiterIndex !== -1) {
+        const mimeType = image.substring(5, mimeTypeDelimiterIndex); // Eliminar 'data:'
 
+        if (mimeType === 'application/pdf') {
+          attachmentName = 'document.pdf';
+          attachmentType = 'application/pdf';
+        } else if (mimeType === 'image/jpeg') {
+          attachmentName = 'image.jpg';
+          attachmentType = 'image/jpeg';
+        } else if (mimeType === 'image/png') {
+          attachmentName = 'image.png';
+          attachmentType = 'image/png';
+        } else if (
+          mimeType ===
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        ) {
+          attachmentName = 'document.xlsx';
+          attachmentType =
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+        } else if (
+          mimeType ===
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        ) {
+          attachmentName = 'document.docx';
+          attachmentType =
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+        }
+      }
+    }
     function isValidEmail(email) {
       return /\S+@\S+\.\S+/.test(email);
     }
@@ -179,7 +232,13 @@ const getNotification = async (req, res) => {
           // Dividir la lista de correos en lotes de 100
           for (let i = 0; i < validEmails.length; i += 100) {
             const batchEmails = validEmails.slice(i, i + 100);
-            await sendCustomEmail(batchEmails, subject, emailContent);
+            await sendCustomEmail(
+              batchEmails,
+              subject,
+              emailContent,
+              attachmentName,
+              attachmentType
+            );
           }
         }
       } else {
@@ -191,9 +250,18 @@ const getNotification = async (req, res) => {
             subject,
             content,
             image,
-            reason
+            reason,
+            attachmentName,
+            attachmentType
           );
-          await sendCustomEmail(email, subject, emailContent);
+          await sendCustomEmail(
+            email,
+            subject,
+            emailContent,
+            attachmentName,
+            attachmentType,
+            image
+          );
         }
       }
     } else if (reason === 'others' || reason === 'promo') {
@@ -207,7 +275,14 @@ const getNotification = async (req, res) => {
           // Dividir la lista de correos en lotes de 100
           for (let i = 0; i < validEmails.length; i += 100) {
             const batchEmails = validEmails.slice(i, i + 100);
-            await sendCustomEmail(batchEmails, subject, emailContent);
+            await sendCustomEmail(
+              batchEmails,
+              subject,
+              emailContent,
+              attachmentName,
+              attachmentType,
+              image
+            );
           }
         }
       } else {
@@ -221,7 +296,14 @@ const getNotification = async (req, res) => {
             image,
             reason
           );
-          await sendCustomEmail(email, subject, emailContent);
+          await sendCustomEmail(
+            email,
+            subject,
+            emailContent,
+            attachmentName,
+            attachmentType,
+            image
+          );
         }
       }
     }
