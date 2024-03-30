@@ -292,7 +292,7 @@ const updateFinancial = async (req, res) => {
     };
 
     // Si el paymentType es 'session', solo actualizar el pago y terminar
-    if (paymentType === 'session') {
+    if (paymentType === 'Court') {
       await paymentRef.update(paymentUpdateData);
       return res
         .status(200)

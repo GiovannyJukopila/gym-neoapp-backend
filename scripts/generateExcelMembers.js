@@ -12,7 +12,7 @@ const worksheet = workbook.addWorksheet('Profiles');
 profilesRef
   .where('gymId', '==', gymIdToFilter)
   .where('role', 'array-contains', roleToFilter)
-  .where('profileStatus', '==', false)
+  .where('profileStatus', '==', 'false')
   .get()
   .then(async (snapshot) => {
     const profilesData = [];

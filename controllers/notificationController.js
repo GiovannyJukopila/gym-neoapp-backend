@@ -18,6 +18,7 @@ const transporter = nodemailer.createTransport({
     user: 'goneoapp@gmail.com',
     pass: 'sahv uasy fzei rykf',
   },
+  from: 'goneoapp@gmail.com',
 });
 
 function buildCustomEmailContent(subject, content, image, reason) {
@@ -120,7 +121,7 @@ async function getMemberEmailsByGymId(gymId) {
     const querySnapshot = await db
       .collection('profiles')
       .where('gymId', '==', gymId)
-      .where('profileStatus', '==', true)
+      .where('profileStatus', '==', 'true')
       .get();
 
     querySnapshot.forEach((doc) => {

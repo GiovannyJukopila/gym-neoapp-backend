@@ -27,11 +27,23 @@ const scanMember = async (req, res) => {
         ? profileData.profileFrozen
         : false;
 
+    const profileInactiveOtherReason =
+      profileData.profileStatus === 'payment-issue' ? true : false;
+
     if (isFrozen) {
       res
         .status(403)
         .send(
           `${profileData.profileName} ${profileData.profileLastname}'s  membership is currently frozen.`
+        );
+      return;
+    }
+
+    if (profileInactiveOtherReason) {
+      res
+        .status(403)
+        .send(
+          `${profileData.profileName} ${profileData.profileLastname}'s  membership is Inactive for a payment Issue `
         );
       return;
     }

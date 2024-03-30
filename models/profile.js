@@ -46,7 +46,8 @@ class Profile {
     profileCoupleName,
     profileCoupleEmail,
     profileIsACouple,
-    permissions
+    permissions,
+    profileNotes
   ) {
     this.profileId = profileId;
     this.cardSerialNumber = cardSerialNumber;
@@ -97,6 +98,7 @@ class Profile {
     this.profileIsACouple = profileIsACouple;
 
     this.permissions = permissions;
+    this.profileNotes = profileNotes;
   }
 }
 

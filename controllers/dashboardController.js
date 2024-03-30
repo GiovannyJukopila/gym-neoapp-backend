@@ -391,7 +391,7 @@ const getCurrentMembersByMemberships = async (req, res) => {
     const profilesRef = db.collection('profiles');
     const snapshot = await profilesRef
       .where('gymId', '==', gymId)
-      .where('profileStatus', '==', true)
+      .where('profileStatus', '==', 'true')
       .get();
 
     const gymSnapshot = await admin
@@ -550,14 +550,16 @@ const setInactiveMembers = async (req, res) => {
         return;
       }
       // Verificar si renewMembershipInQueue existe y renewIsInQueue es falso
-      let profileStatus = false;
+      let profileStatus = 'false';
 
       if (
         profileData.renewMembershipInQueue &&
         profileData.renewMembershipInQueue.renewIsInQueue
       ) {
         profileStatus =
-          profileData.renewMembershipInQueue.profileRenewEndDate > dateString;
+          profileData.renewMembershipInQueue.profileRenewEndDate > dateString
+            ? 'true'
+            : 'false';
 
         const renewMembershipInQueue = profileData.renewMembershipInQueue;
 
@@ -606,7 +608,7 @@ const setInactiveMembers = async (req, res) => {
         // Guarda los cambios en la base de datos (suponiendo que profilesRef es tu referencia a la base de datos)
         await doc.ref.set(profileData, { merge: true });
       } else {
-        profileStatus = profileEndDate >= dateString;
+        profileStatus = profileEndDate >= dateString ? 'true' : 'false';
         batch.update(profileRef, { profileStatus });
       }
 

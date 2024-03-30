@@ -485,7 +485,7 @@ const generateExpirationReport = async (req, res) => {
       .firestore()
       .collection('profiles')
       .where('gymId', '==', gymId)
-      .where('profileStatus', '==', true)
+      .where('profileStatus', '==', 'true')
       .get();
 
     // Configurar el encabezado de la respuesta para descargar el PDF
@@ -720,66 +720,72 @@ const generateDailyReport = async (req, res) => {
       }
 
       try {
-        const profileSnapshot = await admin
-          .firestore()
-          .collection('profiles')
-          .doc(paymentData.profileId)
-          .get();
+        if (
+          ['renew', 'new', 'freeze', 'unfreeze'].includes(
+            paymentData.paymentType
+          )
+        ) {
+          const profileSnapshot = await admin
+            .firestore()
+            .collection('profiles')
+            .doc(paymentData.profileId)
+            .get();
 
-        const membershipSnapshot = await admin
-          .firestore()
-          .collection('memberships')
-          .doc(paymentData.membershipId)
-          .get();
+          const membershipSnapshot = await admin
+            .firestore()
+            .collection('memberships')
+            .doc(paymentData.membershipId)
+            .get();
 
-        const profileData = profileSnapshot.data();
-        const membershipData = membershipSnapshot.data();
+          const profileData = profileSnapshot.data();
+          const membershipData = membershipSnapshot.data();
 
-        const signUpDate = paymentData.paymentDate; // Usar el dato que corresponda
-        const fullName = `${profileData.profileName} ${profileData.profileLastname}`;
-        const cardNo = profileData.cardSerialNumber;
-        const membershipType = membershipData.planName
-          ? membershipData.planName
-          : '';
-        const netRevenue = `€ ${paymentData.paymentAmount}`;
-        const paymentType = paymentData.paymentType;
+          const signUpDate = paymentData.paymentDate; // Usar el dato que corresponda
+          const fullName = `${profileData.profileName} ${profileData.profileLastname}`;
+          const cardNo = profileData.cardSerialNumber;
+          const membershipType = membershipData.planName
+            ? membershipData.planName
+            : '';
+          const netRevenue = `€ ${paymentData.paymentAmount}`;
+          const paymentType = paymentData.paymentType;
 
-        if (paymentType === 'renew') {
-          tablesByPaymentType.Renew.push([
-            signUpDate,
-            fullName,
-            cardNo,
-            membershipType,
-            netRevenue,
-            paymentType,
-          ]);
-        } else if (paymentType === 'new') {
-          tablesByPaymentType.New.push([
-            signUpDate,
-            fullName,
-            cardNo,
-            membershipType,
-            netRevenue,
-            paymentType,
-          ]);
-        } else if (paymentType === 'Freeze') {
-          tablesByPaymentType.Freeze.push([
-            signUpDate,
-            fullName,
-            cardNo,
-            membershipType,
-            netRevenue,
-            paymentType,
-          ]);
-        } else if (paymentType === 'UnFreeze') {
-          tablesByPaymentType.Unfreeze.push([
-            signUpDate,
-            fullName,
-            cardNo,
-            membershipType,
-            netRevenue,
-            paymentType,
-          ]);
+          if (paymentType === 'renew') {
+            tablesByPaymentType.Renew.push([
+              signUpDate,
+              fullName,
+              cardNo,
+              membershipType,
+              netRevenue,
+              paymentType,
+            ]);
+          } else if (paymentType === 'new') {
+            tablesByPaymentType.New.push([
+              signUpDate,
+              fullName,
+              cardNo,
+              membershipType,
+              netRevenue,
+              paymentType,
+            ]);
+          } else if (paymentType === 'Freeze') {
+            tablesByPaymentType.Freeze.push([
+              signUpDate,
+              fullName,
+              cardNo,
+              membershipType,
+              netRevenue,
+              paymentType,
+            ]);
+          } else if (paymentType === 'UnFreeze') {
+            tablesByPaymentType.Unfreeze.push([
+              signUpDate,
+              fullName,
+              cardNo,
+              membershipType,
+              netRevenue,
+              paymentType,
+            ]);
+          }
         }
       } catch (error) {
         console.error('Error fetching profiles/memberships:', error);
@@ -912,6 +918,93 @@ const generateDailyReport = async (req, res) => {
         }
       }
     }
+    try {
+      // Generar la tabla de Courts
+      const courtsPaymentsSnapshot = await admin
+        .firestore()
+        .collection('paymentHistory')
+        .where('gymId', '==', gymId)
+        .where('paymentType', '==', 'Court')
+        .where('paymentDate', '==', selectedDate)
+        .get();
+
+      const courtsTableData = [];
+
+      for (const doc of courtsPaymentsSnapshot.docs) {
+        const paymentData = doc.data();
+
+        const signUpDate = paymentData.paymentDate; // Usar el dato que corresponda
+        const netRevenue = `€ ${paymentData.paymentAmount}`;
+
+        if (paymentData.memberType === 'member') {
+          let fullName = '';
+          let cardNo = '';
+          if (paymentData.participants && paymentData.participants.length > 0) {
+            const participant = paymentData.participants[0];
+            const participantId = participant.profileId;
+            console.log('participantId: ', participantId);
+            const profileSnapshot = await admin
+              .firestore()
+              .collection('profiles')
+              .doc(participantId)
+              .get();
+
+            const profileData = profileSnapshot.data();
+            fullName = `${profileData.profileName} ${profileData.profileLastname}`;
+            cardNo = profileData.cardSerialNumber;
+          } else {
+            console.error(
+              'Participant not found for Courts payment:',
+              paymentData
+            );
+          }
+          courtsTableData.push([
+            signUpDate,
+            fullName,
+            cardNo,
+            'Member', // Tipo de membresía para miembros de Courts
+            netRevenue,
+            'Courts', // Tipo de pago
+          ]);
+        } else if (paymentData.memberType === 'guest') {
+          const roomNumber = paymentData.roomNumber;
+          courtsTableData.push([
+            signUpDate,
+            'Guest', // Tipo de membresía para invitados de Courts
+            roomNumber,
+            'Unknow Member',
+            netRevenue,
+            'Courts', // Tipo de pago
+          ]);
+        } else {
+          console.error(
+            'Invalid memberType for Courts payment:',
+            paymentData.memberType
+          );
+        }
+      }
+
+      const courtsTableHeaders = [
+        'Sign Up Date',
+        'Full Name',
+        'Card No/ Room Number',
+        'Membership Type',
+        'Net Revenue',
+        'Payment Type',
+      ];
+
+      if (courtsTableData.length > 0) {
+        // Verificar si hay suficiente espacio en la página actual
+        if (doc.y + 300 > doc.page.height) {
+          doc.addPage(); // Agregar una nueva página si no hay suficiente espacio
+        }
+
+        generateTable('Courts', courtsTableData, courtsTableHeaders);
+      }
+    } catch (error) {
+      console.error('Error generating Courts table:', error);
+      // Manejar el error apropiadamente
+    }
 
     doc.end();
   } catch (error) {
@@ -931,7 +1024,7 @@ const generateActiveMembersReport = async (req, res) => {
     const snapshot = await profilesRef
       .where('gymId', '==', gymId)
       .where('role', 'array-contains', 'member')
-      .where('profileStatus', '==', true)
+      .where('profileStatus', '==', 'true')
       .get();
 
     const profilesData = [];
@@ -975,7 +1068,7 @@ const generateActiveMembersReport = async (req, res) => {
         profileStartDate: profile.profileStartDate || '',
         profileEndDate: profile.profileEndDate || '',
         planName: planName,
-        profileStatus: profile.profileStatus ? 'Active' : 'Inactive',
+        profileStatus: profile.profileStatus == 'true' ? 'Active' : 'Inactive',
       });
     });
 
@@ -1022,7 +1115,7 @@ const generateInactiveMembersReport = async (req, res) => {
     const snapshot = await profilesRef
       .where('gymId', '==', gymId)
       .where('role', 'array-contains', 'member')
-      .where('profileStatus', '==', false)
+      .where('profileStatus', '==', 'false')
       .get();
 
     const profilesData = [];
@@ -1083,7 +1176,7 @@ const generateInactiveMembersReport = async (req, res) => {
         profileStartDate: profile.profileStartDate || '',
         profileEndDate: profile.profileEndDate || '',
         planName: profile.planName || '',
-        profileStatus: profile.profileStatus ? 'Active' : 'Inactive',
+        profileStatus: profile.profileStatus == 'true' ? 'Active' : 'Inactive',
         inactiveType: profile.inactiveType || '',
       });
     });

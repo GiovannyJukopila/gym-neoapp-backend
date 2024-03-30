@@ -327,7 +327,7 @@ const createSession = async (req, res) => {
         paymentDate: new Date().toISOString().slice(0, 10),
         paymentStartTime: req.body.endTime,
         paymentEndTime: req.body.startTime,
-        paymentType: 'session',
+        paymentType: 'Court',
         paymentAmount: body.feeValue,
         paymentCourtId: body.selectCourt, // Establecer el paymentAmount obtenido del membership
         // ... (otros datos relacionados con el pago o historial)
@@ -418,13 +418,91 @@ const getallSession = async (req, res) => {
   }
 };
 
+// const updateSession = async (req, res) => {
+//   try {
+//     const { sessionId, formData } = req.body;
+//     const profileRef = db.collection('sessionHistory').doc(sessionId);
+
+//     // Actualiza el documento con los datos proporcionados en formData
+//     await profileRef.update(formData);
+
+//     res.json({ message: 'Profile record updated successfully' });
+//   } catch (error) {
+//     res.status(400).send(error.message);
+//   }
+// };
+
 const updateSession = async (req, res) => {
   try {
     const { sessionId, formData } = req.body;
     const profileRef = db.collection('sessionHistory').doc(sessionId);
 
-    // Actualiza el documento con los datos proporcionados en formData
+    // Validar los datos recibidos en formData
+    if (!formData || !formData.startTime || !formData.endTime) {
+      return res.status(400).json({ error: 'Invalid formData provided' });
+    }
+
+    const courtSelected = db.collection('courts').doc(formData.selectCourt);
+    const courtSnapshot = await courtSelected.get();
+    const courtName = courtSnapshot.get('courtName');
+
+    const gymId = courtSnapshot.get('gymId');
+    formData.courtName = courtName;
+
+    const maxBookingPerDay = courtSnapshot.get('maxBookingPerDay');
+    const maxBookingPerWeek = courtSnapshot.get('maxBookingPerWeek');
+    const feeIsActive = courtSnapshot.get('bookingFee');
+    const eventDate = new Date(formData.eventDate).toISOString().split('T')[0];
+
+    // Validar límites diarios y semanales de reservas
+
+    const timeToMinutes = (time) => {
+      const [hours, minutes] = time.split(':').map(Number);
+      return hours * 60 + minutes;
+    };
+    // Validar superposiciones de horarios
+    const overlappingSessions = await db
+      .collection('sessionHistory')
+      .where('gymId', '==', gymId)
+      .where('createDate', '==', eventDate)
+      .where('selectCourt', '==', formData.selectCourt)
+      .get();
+
+    const conflict = overlappingSessions.docs.some((doc) => {
+      const existingStartTime = doc.data().startTime;
+      const existingEndTime = doc.data().endTime;
+
+      const existingStartMinutes = timeToMinutes(existingStartTime);
+      const existingEndMinutes = timeToMinutes(existingEndTime);
+      const bodyStartMinutes = timeToMinutes(formData.startTime);
+      const bodyEndMinutes = timeToMinutes(formData.endTime);
+
+      return (
+        (bodyStartMinutes < existingStartMinutes &&
+          bodyEndMinutes > existingStartMinutes &&
+          bodyEndMinutes <= existingEndMinutes) ||
+        (bodyStartMinutes >= existingStartMinutes &&
+          bodyStartMinutes < existingEndMinutes &&
+          bodyEndMinutes <= existingEndMinutes) ||
+        (bodyStartMinutes >= existingStartMinutes &&
+          bodyStartMinutes < existingEndMinutes &&
+          bodyEndMinutes > existingEndMinutes) ||
+        (bodyStartMinutes < existingStartMinutes &&
+          bodyEndMinutes > existingEndMinutes)
+      );
+    });
+
+    if (conflict) {
+      return res.status(400).json({
+        error:
+          'There is already a scheduled session with overlapping schedules on this day for the same court',
+      });
+    }
+
+    // Actualizar el documento en la colección "sessionHistory"
     await profileRef.update(formData);
+
+    // Resto del código...
 
     res.json({ message: 'Profile record updated successfully' });
   } catch (error) {

@@ -84,6 +84,7 @@ const createProfile = async (req, res) => {
         profileTotalReceive: req.body.profileTotalReceive,
         profileCoupleName: req?.body?.profileCoupleName,
         profileCoupleEmail: req?.body?.profileCoupleEmail,
+        profileNotes: req?.body?.profileNotes,
       };
 
       // Crea el nuevo perfil
@@ -201,7 +202,9 @@ const getAllProfiles = async (req, res) => {
         doc.data().renewIsInQueue,
         doc.data().profileCoupleName,
         doc.data().profileCoupleEmail,
-        doc.data().profileIsACouple
+        doc.data().profileIsACouple,
+        doc.data().permissions,
+        doc.data().profileNotes
         // doc.data().profileFile,
       );
 
