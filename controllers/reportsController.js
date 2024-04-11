@@ -721,7 +721,7 @@ const generateDailyReport = async (req, res) => {
 
       try {
         if (
-          ['renew', 'new', 'freeze', 'unfreeze'].includes(
+          ['renew', 'new', 'Freeze', 'UnFreeze'].includes(
             paymentData.paymentType
           )
         ) {
