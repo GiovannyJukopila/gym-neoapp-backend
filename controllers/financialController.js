@@ -8,135 +8,6 @@ const moment = require('moment-timezone');
 
 app.use(bodyParser.json());
 
-const getAllFinancial = async (req, res) => {
-  try {
-    const { gymId, filterOption, offset, itemsPerPage } = req.query;
-
-    const filterDate = await calculateDate(filterOption, gymId);
-    // 1. Consultar la colección paymentHistory filtrando por paymentDate y gymId
-    const paymentHistorySnapshot = await db
-      .collection('paymentHistory')
-      .where('paymentDate', '==', filterDate)
-      .where('gymId', '==', gymId)
-      .limit(parseInt(itemsPerPage)) // Limitar la cantidad de elementos devueltos
-      .offset(parseInt(offset)) // Establecer el offset para la paginación
-      .get();
-
-    // 2. Obtener los datos específicos de los pagos y extraer los profileId, paymentType, paymentDate, paymentAmount, membershipId
-    const payments = [];
-    paymentHistorySnapshot.forEach((doc) => {
-      const paymentData = doc.data();
-      const {
-        paymentId,
-        profileId,
-        paymentType,
-        paymentDate,
-        paymentAmount,
-        membershipId,
-        participants,
-        paymentCourtId,
-        roomNumber,
-        memberType,
-      } = paymentData;
-
-      // Asegúrate de que profileId y membershipId no sean undefined antes de agregarlos a payments
-      const paymentEntry = {
-        paymentId,
-        paymentType,
-        paymentDate,
-        paymentAmount,
-        participants,
-        paymentCourtId,
-        roomNumber,
-        memberType,
-      };
-
-      if (profileId !== undefined) {
-        paymentEntry.profileId = profileId;
-      } else {
-        paymentEntry.profileId = null; // O asigna otro valor por defecto
-      }
-
-      if (membershipId !== undefined) {
-        paymentEntry.membershipId = membershipId;
-      } else {
-        paymentEntry.membershipId = null; // O asigna otro valor por defecto
-      }
-
-      if (participants && participants.length > 0) {
-        const firstParticipant = participants[0];
-        if (firstParticipant.profileId !== undefined) {
-          paymentEntry.profileId = firstParticipant.profileId;
-        }
-        if (firstParticipant.membershipId !== undefined) {
-          paymentEntry.membershipId = firstParticipant.membershipId;
-        }
-      }
-
-      payments.push(paymentEntry);
-    });
-
-    // 3. Obtener los nombres de plan de la colección memberships utilizando los membershipId
-    const membershipIds = payments
-      .filter((payment) => payment.membershipId !== undefined)
-      .map((payment) => payment.membershipId);
-
-    if (membershipIds.length > 0) {
-      const membershipsSnapshot = await db
-        .collection('memberships')
-        .where('membershipId', 'in', membershipIds)
-        .get();
-
-      const membershipsData = {};
-      membershipsSnapshot.forEach((doc) => {
-        const membershipData = doc.data();
-        membershipsData[membershipData.membershipId] = membershipData.planName;
-      });
-
-      // 4. Obtener profileName y profileLastname de la colección profiles utilizando los profileId
-      const profileIds = payments
-        .filter((payment) => payment.profileId !== undefined)
-        .map((payment) => payment.profileId);
-
-      if (profileIds.length > 0) {
-        const profilesSnapshot = await db
-          .collection('profiles')
-          .where('profileId', 'in', profileIds)
-          .get();
-
-        const profilesData = {};
-        profilesSnapshot.forEach((doc) => {
-          const profileData = doc.data();
-          profilesData[profileData.profileId] = {
-            profileName: profileData.profileName,
-            profileLastname: profileData.profileLastname,
-          };
-        });
-
-        // 5. Construir la respuesta combinando la información de pagos, nombres de planes, y nombres de perfil
-        const financialInfo = payments.map((payment) => ({
-          ...payment,
-          planName: membershipsData[payment.membershipId] || 'N/A',
-          profileName: profilesData[payment.profileId]?.profileName || 'N/A',
-          profileLastname:
-            profilesData[payment.profileId]?.profileLastname || '',
-        }));
-
-        res.status(200).json(financialInfo);
-      } else {
-        // Manejo si no hay perfiles encontrados para esos pagos
-        res.status(200).json([]);
-      }
-    } else {
-      // Manejo si no hay pagos encontrados para esa fecha y gimnasio
-      res.status(200).json([]);
-    }
-  } catch (error) {
-    console.error('Error getting financial data:', error);
-    res.status(500).send('Error getting financial data');
-  }
-};
-
 // const getAllFinancial = async (req, res) => {
 //   try {
 //     const { gymId, filterOption, offset, itemsPerPage } = req.query;
@@ -162,19 +33,53 @@ const getAllFinancial = async (req, res) => {
 //         paymentDate,
 //         paymentAmount,
 //         membershipId,
+//         participants,
+//         paymentCourtId,
+//         roomNumber,
+//         memberType,
 //       } = paymentData;
-//       payments.push({
+
+//       // Asegúrate de que profileId y membershipId no sean undefined antes de agregarlos a payments
+//       const paymentEntry = {
 //         paymentId,
-//         profileId,
 //         paymentType,
 //         paymentDate,
 //         paymentAmount,
-//         membershipId,
-//       });
+//         participants,
+//         paymentCourtId,
+//         roomNumber,
+//         memberType,
+//       };
+
+//       if (profileId !== undefined) {
+//         paymentEntry.profileId = profileId;
+//       } else {
+//         paymentEntry.profileId = null; // O asigna otro valor por defecto
+//       }
+
+//       if (membershipId !== undefined) {
+//         paymentEntry.membershipId = membershipId;
+//       } else {
+//         paymentEntry.membershipId = null; // O asigna otro valor por defecto
+//       }
+
+//       if (participants && participants.length > 0) {
+//         const firstParticipant = participants[0];
+//         if (firstParticipant.profileId !== undefined) {
+//           paymentEntry.profileId = firstParticipant.profileId;
+//         }
+//         if (firstParticipant.membershipId !== undefined) {
+//           paymentEntry.membershipId = firstParticipant.membershipId;
+//         }
+//       }
+
+//       payments.push(paymentEntry);
 //     });
 
 //     // 3. Obtener los nombres de plan de la colección memberships utilizando los membershipId
-//     const membershipIds = payments.map((payment) => payment.membershipId);
+//     const membershipIds = payments
+//       .filter((payment) => payment.membershipId !== undefined)
+//       .map((payment) => payment.membershipId);
 
 //     if (membershipIds.length > 0) {
 //       const membershipsSnapshot = await db
@@ -189,31 +94,39 @@ const getAllFinancial = async (req, res) => {
 //       });
 
 //       // 4. Obtener profileName y profileLastname de la colección profiles utilizando los profileId
-//       const profileIds = payments.map((payment) => payment.profileId);
+//       const profileIds = payments
+//         .filter((payment) => payment.profileId !== undefined)
+//         .map((payment) => payment.profileId);
 
-//       const profilesSnapshot = await db
-//         .collection('profiles')
-//         .where('profileId', 'in', profileIds)
-//         .get();
+//       if (profileIds.length > 0) {
+//         const profilesSnapshot = await db
+//           .collection('profiles')
+//           .where('profileId', 'in', profileIds)
+//           .get();
 
-//       const profilesData = {};
-//       profilesSnapshot.forEach((doc) => {
-//         const profileData = doc.data();
-//         profilesData[profileData.profileId] = {
-//           profileName: profileData.profileName,
-//           profileLastname: profileData.profileLastname,
-//         };
-//       });
+//         const profilesData = {};
+//         profilesSnapshot.forEach((doc) => {
+//           const profileData = doc.data();
+//           profilesData[profileData.profileId] = {
+//             profileName: profileData.profileName,
+//             profileLastname: profileData.profileLastname,
+//           };
+//         });
 
-//       // 5. Construir la respuesta combinando la información de pagos, nombres de planes, y nombres de perfil
-//       const financialInfo = payments.map((payment) => ({
-//         ...payment,
-//         planName: membershipsData[payment.membershipId],
-//         profileName: profilesData[payment.profileId]?.profileName || '',
-//         profileLastname: profilesData[payment.profileId]?.profileLastname || '',
-//       }));
+//         // 5. Construir la respuesta combinando la información de pagos, nombres de planes, y nombres de perfil
+//         const financialInfo = payments.map((payment) => ({
+//           ...payment,
+//           planName: membershipsData[payment.membershipId] || 'N/A',
+//           profileName: profilesData[payment.profileId]?.profileName || 'N/A',
+//           profileLastname:
+//             profilesData[payment.profileId]?.profileLastname || '',
+//         }));
 
-//       res.status(200).json(financialInfo);
+//         res.status(200).json(financialInfo);
+//       } else {
+//         // Manejo si no hay perfiles encontrados para esos pagos
+//         res.status(200).json([]);
+//       }
 //     } else {
 //       // Manejo si no hay pagos encontrados para esa fecha y gimnasio
 //       res.status(200).json([]);
@@ -223,6 +136,105 @@ const getAllFinancial = async (req, res) => {
 //     res.status(500).send('Error getting financial data');
 //   }
 // };
+
+const getAllFinancial = async (req, res) => {
+  try {
+    const { gymId, filterOption, offset, itemsPerPage } = req.query;
+
+    const filterDate = await calculateDate(filterOption, gymId);
+    const paymentHistorySnapshot = await db
+      .collection('paymentHistory')
+      .where('paymentDate', '==', filterDate)
+      .where('gymId', '==', gymId)
+      .limit(parseInt(itemsPerPage))
+      .offset(parseInt(offset))
+      .get();
+
+    const payments = [];
+    paymentHistorySnapshot.forEach((doc) => {
+      const paymentData = doc.data();
+      payments.push({
+        paymentId: paymentData.paymentId,
+        paymentType: paymentData.paymentType,
+        paymentDate: paymentData.paymentDate,
+        paymentAmount: paymentData.paymentAmount,
+        participants: paymentData.participants,
+        paymentCourtId: paymentData.paymentCourtId,
+        roomNumber: paymentData.roomNumber,
+        memberType: paymentData.memberType,
+        profileId: paymentData.profileId || null,
+        membershipId: paymentData.membershipId || null,
+      });
+    });
+
+    const membershipIds = payments
+      .filter((payment) => payment.membershipId !== null)
+      .map((payment) => payment.membershipId);
+
+    const membershipsData = {};
+    const profileIds = [];
+    payments.forEach((payment) => {
+      if (payment.profileId !== null) {
+        profileIds.push(payment.profileId);
+      }
+    });
+
+    if (membershipIds.length > 0) {
+      const membershipBatches = [];
+      for (let i = 0; i < membershipIds.length; i += 30) {
+        membershipBatches.push(membershipIds.slice(i, i + 30));
+      }
+
+      for (const batch of membershipBatches) {
+        const membershipsSnapshot = await db
+          .collection('memberships')
+          .where('membershipId', 'in', batch)
+          .get();
+
+        membershipsSnapshot.forEach((doc) => {
+          const membershipData = doc.data();
+          membershipsData[membershipData.membershipId] =
+            membershipData.planName;
+        });
+      }
+    }
+
+    const profilesData = {};
+    if (profileIds.length > 0) {
+      const profileBatches = [];
+      for (let i = 0; i < profileIds.length; i += 30) {
+        profileBatches.push(profileIds.slice(i, i + 30));
+      }
+
+      for (const batch of profileBatches) {
+        const profilesSnapshot = await db
+          .collection('profiles')
+          .where('profileId', 'in', batch)
+          .get();
+
+        profilesSnapshot.forEach((doc) => {
+          const profileData = doc.data();
+          profilesData[profileData.profileId] = {
+            profileName: profileData.profileName,
+            profileLastname: profileData.profileLastname,
+          };
+        });
+      }
+    }
+
+    const financialInfo = payments.map((payment) => ({
+      ...payment,
+      planName: membershipsData[payment.membershipId] || 'N/A',
+      profileName: profilesData[payment.profileId]?.profileName || 'N/A',
+      profileLastname: profilesData[payment.profileId]?.profileLastname || '',
+    }));
+
+    res.status(200).json(financialInfo);
+  } catch (error) {
+    console.error('Error getting financial data:', error);
+    res.status(500).send('Error getting financial data');
+  }
+};
 
 async function calculateDate(filterOption, gymId) {
   try {
