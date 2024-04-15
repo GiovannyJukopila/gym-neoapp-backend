@@ -3,6 +3,7 @@ const app = express();
 const { db } = require('../firebase');
 const bodyParser = require('body-parser');
 const admin = require('firebase-admin');
+const moment = require('moment');
 app.use(bodyParser.json());
 
 // const createClass = async (req, res) => {
@@ -360,11 +361,18 @@ const getAllClasses = async (req, res) => {
 
     const getClassesCollection = db.collection('classes');
 
-    // Agrega una cláusula where para filtrar por gymId
+    const currentMonthStart = moment().startOf('month');
+    const prevMonthStart = moment(currentMonthStart)
+      .subtract(1, 'months')
+      .startOf('month');
+    const nextMonthEnd = moment(currentMonthStart)
+      .add(1, 'months')
+      .endOf('month');
+
     const response = await getClassesCollection
-      .where('gymId', '==', gymId) // Filtrar perfiles por gymId
-      .limit(itemsPerPage)
-      .offset(offset)
+      .where('gymId', '==', gymId)
+      .where('eventDate', '>=', prevMonthStart.format())
+      .where('eventDate', '<=', nextMonthEnd.format())
       .get();
 
     const classesArray = [];
