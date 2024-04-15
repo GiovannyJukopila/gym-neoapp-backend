@@ -3,6 +3,7 @@ const app = express();
 const { db } = require('../firebase');
 const bodyParser = require('body-parser');
 const admin = require('firebase-admin');
+const moment = require('moment');
 
 const {
   formatISO,
@@ -374,17 +375,20 @@ const getallSession = async (req, res) => {
   try {
     const gymId = req.query.gymId;
 
-    // Continúa con tu lógica para obtener perfiles y realizar otras operaciones
-    const offset = parseInt(req.query.offset) || 0;
-    const itemsPerPage = parseInt(req.query.itemsPerPage) || 4;
-
     const getClassesCollection = db.collection('sessionHistory');
 
-    // Agrega una cláusula where para filtrar por gymId
+    const currentMonthStart = moment().startOf('month');
+    const prevMonthStart = moment(currentMonthStart)
+      .subtract(1, 'months')
+      .startOf('month');
+    const nextMonthEnd = moment(currentMonthStart)
+      .add(1, 'months')
+      .endOf('month');
+
     const response = await getClassesCollection
-      .where('gymId', '==', gymId) // Filtrar perfiles por gymId
-      .limit(itemsPerPage)
-      .offset(offset)
+      .where('gymId', '==', gymId)
+      .where('eventDate', '>=', prevMonthStart.format())
+      .where('eventDate', '<=', nextMonthEnd.format())
       .get();
 
     const sessionsArray = [];
