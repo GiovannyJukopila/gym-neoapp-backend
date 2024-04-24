@@ -381,7 +381,7 @@ const getAllClasses = async (req, res) => {
       const membership = {
         id: doc.id,
         classId: data.classId,
-        descriptions: data.description, // Si descriptions no está definido, usar un array vacío
+        description: data.description, // Si descriptions no está definido, usar un array vacío
         gymId: data.gymId, // Si gymId no está definido, usar una cadena vacía
         activityType: data.activityType,
         classCapacity: data.classCapacity,

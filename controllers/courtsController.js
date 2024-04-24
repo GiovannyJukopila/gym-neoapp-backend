@@ -313,6 +313,40 @@ const createSession = async (req, res) => {
       sessionLastSerialNumber: documentName,
     });
 
+    if (feeIsActive && body?.participants?.length > 0) {
+      const firstParticipant = body.participants[0];
+      const paymentHistoryRef = db.collection('paymentHistory');
+      const newPaymentHistoryDoc = paymentHistoryRef.doc();
+      const paymentId = newPaymentHistoryDoc.id;
+
+      // Obtener los datos del primer participante
+      const { profileId, membershipId, profileName, profileLastname } =
+        firstParticipant;
+
+      // Crear un documento en la colección paymentHistory con el paymentAmount y los datos del primer participante
+      const paymentHistoryData = {
+        paymentId: paymentId,
+        participants: body.participants,
+        memberType: body.memberType,
+        roomNumber: body.roomNumber,
+        eventDate: body.eventDate,
+        gymId: body.gymId,
+        paymentDate: new Date().toISOString().slice(0, 10),
+        paymentStartTime: req.body.endTime,
+        paymentEndTime: req.body.startTime,
+        paymentType: 'Court',
+        paymentAmount: body.feeValue,
+        paymentCourtId: body.selectCourt,
+        // Agregar los datos del primer participante
+        profileId: profileId,
+        membershipId: membershipId,
+        profileName: profileName,
+        profileLastname: profileLastname,
+        // ... (otros datos relacionados con el pago o historial)
+      };
+      await paymentHistoryRef.doc(paymentId).set(paymentHistoryData);
+    }
+
     if (feeIsActive) {
       const paymentHistoryRef = db.collection('paymentHistory');
       const newPaymentHistoryDoc = paymentHistoryRef.doc();
