@@ -125,6 +125,7 @@ const getlogIn = async (req, res) => {
       const gymSnapShot = await gymRef.get();
       const gymData = gymSnapShot.data();
       const gymEndDate = gymData.gymEndDate;
+      const activeModules = gymData.activeModules;
 
       const currentDate = new Date();
       const endDate = new Date(gymEndDate);
@@ -208,6 +209,7 @@ const getlogIn = async (req, res) => {
           profileAdminLevel: profileData.profileAdminLevel,
           gymId: profileData.gymId,
           profileIsTrainer: profileData.role,
+          activeModules: activeModules,
           // ...
         };
         return res.status(200).json(responseData);
@@ -584,13 +586,21 @@ const validateAdminCode = async (req, res) => {
           const profileSnapshot = await profileRef.get();
 
           const profileDoc = profileSnapshot.docs[0];
-          profileData = profileDoc.data();
+          const profileData = profileDoc.data();
+
+          const profileId = profileData.profileId;
+          const gymId = profileData.gymId;
+
+          const gymRef = db.collection('gyms').doc(gymId);
+          const gymSnapShot = await gymRef.get();
+          const gymData = gymSnapShot.data();
+          const activeModules = gymData.activeModules;
 
           const secretKey = process.env.ACCESS_TOKEN_SECRET;
 
           const token = jwt.sign(
             {
-              profileId: profileData.profileId,
+              profileId: profileId,
             },
             secretKey
           );
@@ -613,6 +623,7 @@ const validateAdminCode = async (req, res) => {
             profileAdminLevel: profileData.profileAdminLevel,
             gymId: profileData.gymId,
             profileIsTrainer: profileData.role,
+            activeModules: activeModules,
             // ...
           };
           return res.status(200).json({
