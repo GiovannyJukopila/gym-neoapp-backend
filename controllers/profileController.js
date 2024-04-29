@@ -989,7 +989,39 @@ const searchByCardNumber = async (req, res) => {
   }
 };
 
-module.exports = { searchByCardNumber };
+const searchKnownMemberByCardNumber = async (req, res) => {
+  try {
+    let searchTerm = req.query.term; // Obtén el término de búsqueda y elimina espacios adicionales
+    searchTerm = searchTerm.trim().toUpperCase(); // Convierte a mayúsculas y elimina espacios al principio y al final
+
+    const gymId = req.query.gymId; // Obtén el gymId de la solicitud
+
+    const profilesRef = db.collection('profiles');
+
+    const snapshot = await profilesRef
+      .where('gymId', '==', gymId) // Filtrar por gymId
+      .where('role', 'array-contains', 'unknownMember')
+      .where('cardSerialNumber', '==', searchTerm) // Operador de rango// Operador de rango
+      .get();
+
+    const profiles = [];
+
+    snapshot.forEach((doc) => {
+      profiles.push(doc.data());
+    });
+
+    if (profiles.length === 0) {
+      res.status(404).json({ message: 'Perfiles no encontrados' });
+    } else {
+      res.json(profiles);
+    }
+  } catch (error) {
+    console.error('Error al buscar perfiles por número de tarjeta:', error);
+    res.status(500).json({
+      error: 'Error al buscar perfiles por número de tarjeta',
+    });
+  }
+};
 
 const searchProfile = async (req, res) => {
   try {
@@ -1051,81 +1083,6 @@ const searchProfile = async (req, res) => {
   }
 };
 
-// const searchProfile = async (req, res) => {
-//   try {
-//     let partialName = req.query.term; // Obtén el correo electrónico parcial de la solicitud
-//     partialName = partialName.charAt(0).toUpperCase() + partialName.slice(1);
-
-//     console.log(partialName);
-//     const gymId = req.query.gymId; // Obtén el gymId de la solicitud
-
-//     // Realiza una consulta a la colección 'profiles' filtrando por gymId y buscando perfiles que contengan el correo electrónico parcial
-//     const querySnapshot = await db
-//       .collection('profiles')
-//       .where('gymId', '==', gymId) // Filtrar por gymId
-//       .where('role', '==', 'member')
-//       .where('profilelastName', '>=', partialName)
-//       .where('profilelastName', '<=', partialName + '\uf8ff')
-//       .get();
-
-//     if (querySnapshot.empty) {
-//       // Si no se encuentra ningún perfil con el correo electrónico parcial, responde con un mensaje apropiado
-//       res.status(404).json({ message: 'Perfiles no encontrados' });
-//     } else {
-//       // Si se encuentran perfiles, obtén sus datos
-//       const profiles = [];
-//       querySnapshot.forEach((doc) => {
-//         profiles.push(doc.data());
-//       });
-
-//       res.json(profiles);
-//     }
-//   } catch (error) {
-//     console.error(
-//       'Error al buscar perfiles por correo electrónico parcial:',
-//       error
-//     );
-//     res.status(500).json({
-//       error: 'Error al buscar perfiles por correo electrónico parcial',
-//     });
-//   }
-// };
-
-// Asociar la función de carga de archivos con una ruta existente
-
-// const updateProfile = async (req, res) => {
-//   try {
-//     const { profileCode, formData } = req.body;
-
-//     const profileRef = db.collection('profiles').doc(profileCode);
-
-//     // Actualiza el documento con los datos proporcionados en formData
-//     await profileRef.update(formData);
-
-//     res.json({ message: 'Profile record updated successfully', formData });
-//   } catch (error) {
-//     res.status(400).send(error.message);
-//   }
-// };
-
-// const updateProfile = async (req, res) => {
-//   try {
-//     const { profileId, fieldName, newValue } = req.body;
-//     const updateData = { [fieldName]: newValue };
-//     const getProfile = await db.collection('profiles').doc(profileId);
-//     await getProfile.update(updateData);
-//     res.send('Profile record updated successfuly');
-//   } catch (error) {
-//     res.status(400).send(error.message);
-//   }
-// };
-
-// {
-//   "fieldName": "profileStatus",
-//   "profileId":"EdjBhYQAEwBMKH9Dsg0v",
-// "newValue": false
-// }
-
 module.exports = {
   getAllProfiles,
   getProfile,
@@ -1142,4 +1099,5 @@ module.exports = {
   getProfileByEmail,
   getProfileByName,
   searchByCardNumber,
+  searchKnownMemberByCardNumber,
 };

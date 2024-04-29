@@ -172,6 +172,7 @@ const deleteCourt = async (req, res) => {
 const createSession = async (req, res) => {
   try {
     const body = req.body;
+    const memberType = body.memberType;
     const gymId = req.query.gymId;
     // Genera el número secuencial utilizando la función
     const sessionSerialNumber = await generateSequentialSessionNumber(gymId);
@@ -184,77 +185,165 @@ const createSession = async (req, res) => {
     const courtName = courtSnapshot.get('courtName');
 
     body.courtName = courtName;
+    body.sessionId = documentName;
 
     const maxBookingPerDay = courtSnapshot.get('maxBookingPerDay');
     const maxBookingPerWeek = courtSnapshot.get('maxBookingPerWeek');
     const feeIsActive = courtSnapshot.get('bookingFee');
     const eventDate = new Date(body.eventDate).toISOString().split('T')[0];
     // Validar si maxBookingPerDay y maxBookingPerWeek son diferentes de null
-    if (
-      maxBookingPerDay !== null &&
-      maxBookingPerDay !== 0 &&
-      maxBookingPerWeek !== null &&
-      maxBookingPerWeek !== 0
-    ) {
-      // Obtener la fecha actual en formato YYYY-MM-DD
 
-      // Consultar la colección paymentsHistory filtrando por la fecha del evento y el courtId seleccionado
-      const paymentsSnapshotDay = await db
-        .collection('sessionHistory')
-        .where('gymId', '==', gymId)
-        .where('createDate', '==', eventDate)
-        .where('memberType', '==', 'member')
-        .get();
+    if (memberType === 'unknownmember') {
+      const firstParticipant = body.unknownParticipants[0];
 
-      // Contar la cantidad de reservas para el perfil en la posición 0 de participants
-      const participantProfileId = body?.participants?.[0]?.profileId;
-      const dailyReservationsCount = paymentsSnapshotDay.docs.reduce(
-        (count, doc) =>
-          doc.data()?.participants?.[0]?.profileId === participantProfileId
-            ? count + 1
-            : count,
-        0
-      );
+      // Obtener los datos del primer participante
+      const { selectedPackage, currentCredit } = firstParticipant;
 
-      if (dailyReservationsCount >= maxBookingPerDay) {
+      if (currentCredit === 0) {
         return res.status(400).json({
-          error: 'Daily booking limit exceeded for this court and profile.',
+          error: 'This member does not have available credit',
         });
       }
 
-      const startOfWeekDate = startOfWeek(new Date(eventDate), {
-        weekStartsOn: 1,
-      });
-      const endOfWeekDate = endOfWeek(new Date(startOfWeekDate));
+      const prepaymentType = selectedPackage.prepaymentType;
 
-      const formattedStartOfWeekDate = format(startOfWeekDate, 'yyyy-MM-dd');
-      const formattedEndOfWeekDate = format(endOfWeekDate, 'yyyy-MM-dd');
-
-      // Consultar la colección sessionHistory filtrando por la fecha del evento y el participante
-      const paymentsSnapshotWeek = await db
-        .collection('sessionHistory')
-        .where('gymId', '==', gymId)
-        .where('createDate', '>=', formattedStartOfWeekDate)
-        .where('createDate', '<=', formattedEndOfWeekDate)
-        .where('memberType', '==', 'member')
-        .get();
-
-      const weeklyReservationsCount = paymentsSnapshotWeek.docs.reduce(
-        (count, doc) =>
-          doc.data()?.participants?.[0]?.profileId === participantProfileId
-            ? count + 1
-            : count,
-        0
-      );
-
-      if (weeklyReservationsCount >= maxBookingPerWeek) {
+      if (prepaymentType !== 2 && prepaymentType !== 3) {
         return res.status(400).json({
-          error: 'Weekly booking limit exceeded for this court and profile.',
+          error: 'This members package does not allow creating courts',
         });
       }
-      // Resto del código...
+
+      if (
+        maxBookingPerDay !== null &&
+        maxBookingPerDay !== 0 &&
+        maxBookingPerWeek !== null &&
+        maxBookingPerWeek !== 0
+      ) {
+        // Obtener la fecha actual en formato YYYY-MM-DD
+
+        // Consultar la colección paymentsHistory filtrando por la fecha del evento y el courtId seleccionado
+        const paymentsSnapshotDay = await db
+          .collection('sessionHistory')
+          .where('gymId', '==', gymId)
+          .where('createDate', '==', eventDate)
+          .where('memberType', '==', 'unknownmember')
+          .get();
+
+        // Contar la cantidad de reservas para el perfil en la posición 0 de participants
+        const participantProfileId = body?.unknownParticipants?.[0]?.profileId;
+        const dailyReservationsCount = paymentsSnapshotDay.docs.reduce(
+          (count, doc) =>
+            doc.data()?.participants?.[0]?.profileId === participantProfileId
+              ? count + 1
+              : count,
+          0
+        );
+
+        if (dailyReservationsCount >= maxBookingPerDay) {
+          return res.status(400).json({
+            error: 'Daily booking limit exceeded for this court and profile.',
+          });
+        }
+
+        const startOfWeekDate = startOfWeek(new Date(eventDate), {
+          weekStartsOn: 1,
+        });
+        const endOfWeekDate = endOfWeek(new Date(startOfWeekDate));
+
+        const formattedStartOfWeekDate = format(startOfWeekDate, 'yyyy-MM-dd');
+        const formattedEndOfWeekDate = format(endOfWeekDate, 'yyyy-MM-dd');
+
+        // Consultar la colección sessionHistory filtrando por la fecha del evento y el participante
+        const paymentsSnapshotWeek = await db
+          .collection('sessionHistory')
+          .where('gymId', '==', gymId)
+          .where('createDate', '>=', formattedStartOfWeekDate)
+          .where('createDate', '<=', formattedEndOfWeekDate)
+          .where('memberType', '==', 'unknownmember')
+          .get();
+
+        const weeklyReservationsCount = paymentsSnapshotWeek.docs.reduce(
+          (count, doc) =>
+            doc.data()?.unknownParticipants?.[0]?.profileId ===
+            participantProfileId
+              ? count + 1
+              : count,
+          0
+        );
+
+        if (weeklyReservationsCount >= maxBookingPerWeek) {
+          return res.status(400).json({
+            error: 'Weekly booking limit exceeded for this court and profile.',
+          });
+        }
+        // Resto del código...
+      }
+    } else {
+      if (
+        maxBookingPerDay !== null &&
+        maxBookingPerDay !== 0 &&
+        maxBookingPerWeek !== null &&
+        maxBookingPerWeek !== 0
+      ) {
+        // Obtener la fecha actual en formato YYYY-MM-DD
+
+        // Consultar la colección paymentsHistory filtrando por la fecha del evento y el courtId seleccionado
+        const paymentsSnapshotDay = await db
+          .collection('sessionHistory')
+          .where('gymId', '==', gymId)
+          .where('createDate', '==', eventDate)
+          .where('memberType', '==', 'member')
+          .get();
+
+        // Contar la cantidad de reservas para el perfil en la posición 0 de participants
+        const participantProfileId = body?.participants?.[0]?.profileId;
+        const dailyReservationsCount = paymentsSnapshotDay.docs.reduce(
+          (count, doc) =>
+            doc.data()?.participants?.[0]?.profileId === participantProfileId
+              ? count + 1
+              : count,
+          0
+        );
+
+        if (dailyReservationsCount >= maxBookingPerDay) {
+          return res.status(400).json({
+            error: 'Daily booking limit exceeded for this court and profile.',
+          });
+        }
+
+        const startOfWeekDate = startOfWeek(new Date(eventDate), {
+          weekStartsOn: 1,
+        });
+        const endOfWeekDate = endOfWeek(new Date(startOfWeekDate));
+
+        const formattedStartOfWeekDate = format(startOfWeekDate, 'yyyy-MM-dd');
+        const formattedEndOfWeekDate = format(endOfWeekDate, 'yyyy-MM-dd');
+
+        // Consultar la colección sessionHistory filtrando por la fecha del evento y el participante
+        const paymentsSnapshotWeek = await db
+          .collection('sessionHistory')
+          .where('gymId', '==', gymId)
+          .where('createDate', '>=', formattedStartOfWeekDate)
+          .where('createDate', '<=', formattedEndOfWeekDate)
+          .where('memberType', '==', 'member')
+          .get();
+
+        const weeklyReservationsCount = paymentsSnapshotWeek.docs.reduce(
+          (count, doc) =>
+            doc.data()?.participants?.[0]?.profileId === participantProfileId
+              ? count + 1
+              : count,
+          0
+        );
+
+        if (weeklyReservationsCount >= maxBookingPerWeek) {
+          return res.status(400).json({
+            error: 'Weekly booking limit exceeded for this court and profile.',
+          });
+        }
+        // Resto del código...
+      }
     }
-
     const timeToMinutes = (time) => {
       const [hours, minutes] = time.split(':').map(Number);
       return hours * 60 + minutes;
@@ -325,6 +414,7 @@ const createSession = async (req, res) => {
 
       // Crear un documento en la colección paymentHistory con el paymentAmount y los datos del primer participante
       const paymentHistoryData = {
+        sessionId: documentName,
         paymentId: paymentId,
         participants: body.participants,
         memberType: body.memberType,
@@ -346,13 +436,57 @@ const createSession = async (req, res) => {
       };
       await paymentHistoryRef.doc(paymentId).set(paymentHistoryData);
     }
+    if (feeIsActive && body?.unknownParticipants?.length > 0) {
+      const firstParticipant = body.unknownParticipants[0];
+      const paymentHistoryRef = db.collection('paymentHistory');
+      const newPaymentHistoryDoc = paymentHistoryRef.doc();
+      const paymentId = newPaymentHistoryDoc.id;
 
-    if (feeIsActive) {
+      // Obtener los datos del primer participante
+      const { profileId, profileName, selectedPackage } = firstParticipant;
+
+      const deductedAtBooking = selectedPackage.deductedAtBooking;
+
+      if (deductedAtBooking) {
+        // Restar 1 crédito del currentCredit del memberForm
+        firstParticipant.currentCredit--;
+
+        // Actualizar el currentCredit en el perfil de la persona
+        const profileRef = db.collection('profiles').doc(profileId);
+        await profileRef.update({
+          currentCredit: admin.firestore.FieldValue.increment(-1),
+        });
+      }
+
+      // Crear un documento en la colección paymentHistory con el paymentAmount y los datos del primer participante
+      const paymentHistoryData = {
+        sessionId: documentName,
+        paymentId: paymentId,
+        unknownParticipants: body.unknownParticipants,
+        memberType: body.memberType,
+        roomNumber: body.roomNumber,
+        eventDate: body.eventDate,
+        gymId: body.gymId,
+        paymentDate: new Date().toISOString().slice(0, 10),
+        paymentStartTime: req.body.endTime,
+        paymentEndTime: req.body.startTime,
+        paymentType: 'Court',
+        paymentAmount: body.feeValue,
+        paymentCourtId: body.selectCourt,
+        // Agregar los datos del primer participante
+        profileId: profileId,
+        profileName: profileName,
+        // ... (otros datos relacionados con el pago o historial)
+      };
+      await paymentHistoryRef.doc(paymentId).set(paymentHistoryData);
+    }
+    if (feeIsActive && memberType === 'guest') {
       const paymentHistoryRef = db.collection('paymentHistory');
       const newPaymentHistoryDoc = paymentHistoryRef.doc();
       const paymentId = newPaymentHistoryDoc.id;
       // Crear un documento en la colección paymentHistory con el paymentAmount
       const paymentHistoryData = {
+        sessionId: documentName,
         paymentId: paymentId,
         participants: body?.participants,
         memberType: body.memberType,
@@ -444,6 +578,8 @@ const getallSession = async (req, res) => {
         eventColor: data.eventColor,
         createDate: data.createDate,
         courtName: data.courtName,
+        unknownParticipants: data?.unknownParticipants,
+        sessionId: data?.sessionId,
       };
       sessionsArray.push(membership);
     });
@@ -588,6 +724,43 @@ const deleteSession = async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 };
+
+const getTodaysCourts = async (req, res) => {
+  try {
+    const gymId = req.params.gymId;
+    const cardNumber = req.query.cardNumber;
+
+    const today = new Date().toISOString().slice(0, 10);
+
+    const querySnapshot = await db
+      .collection('sessionHistory')
+      .where('gymId', '==', gymId)
+      .where('memberType', '==', 'unknownmember')
+      .where('eventDate', '>=', `${today}T00:00:00.000Z`)
+      .where('eventDate', '<=', `${today}T23:59:59.999Z`)
+      .get();
+
+    const todaysClasses = [];
+    querySnapshot.forEach((doc) => {
+      const classData = doc.data();
+      if (
+        classData.unknownParticipants &&
+        classData.unknownParticipants.length > 0 &&
+        classData.unknownParticipants[0].cardSerialNumber === cardNumber
+      ) {
+        todaysClasses.push(classData);
+      }
+    });
+
+    res.status(200).json(todaysClasses);
+  } catch (error) {
+    console.error('Error al obtener las clases del día de hoy:', error);
+    res
+      .status(500)
+      .json({ message: 'Error al obtener las clases del día de hoy' });
+  }
+};
+
 module.exports = {
   createCourt,
   getAllCourts,
@@ -597,4 +770,5 @@ module.exports = {
   getallSession,
   updateSession,
   deleteSession,
+  getTodaysCourts,
 };

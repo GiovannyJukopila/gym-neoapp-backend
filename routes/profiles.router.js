@@ -15,6 +15,7 @@ const {
   deleteFile,
   getProfileByName,
   searchByCardNumber,
+  searchKnownMemberByCardNumber,
 } = require('../controllers/profileController');
 const multer = require('multer');
 const verifyToken = require('../middlewares/authMiddleware');
@@ -33,6 +34,8 @@ router.get('/get/:id', getProfile);
 router.get('/search', searchProfile);
 
 router.get('/searchByCardNumber', searchByCardNumber);
+
+router.get('/searchKnownMemberByCardNumber', searchKnownMemberByCardNumber);
 
 router.post('/get/getProfileByName', getProfileByName);
 

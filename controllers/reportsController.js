@@ -942,7 +942,7 @@ const generateDailyReport = async (req, res) => {
           if (paymentData.participants && paymentData.participants.length > 0) {
             const participant = paymentData.participants[0];
             const participantId = participant.profileId;
-            console.log('participantId: ', participantId);
+
             const profileSnapshot = await admin
               .firestore()
               .collection('profiles')
@@ -976,6 +976,38 @@ const generateDailyReport = async (req, res) => {
             netRevenue,
             'Courts', // Tipo de pago
           ]);
+        } else if (paymentData.memberType === 'unknownmember') {
+          let cardNo = '';
+          if (
+            paymentData.unknownParticipants &&
+            paymentData.unknownParticipants.length > 0
+          ) {
+            const participant = paymentData.unknownParticipants[0];
+            const participantId = participant.profileId;
+
+            const profileSnapshot = await admin
+              .firestore()
+              .collection('profiles')
+              .doc(participantId)
+              .get();
+
+            const profileData = profileSnapshot.data();
+            fullName = profileData.profileName;
+            cardNo = profileData.cardSerialNumber;
+          } else {
+            console.error(
+              'Participant not found for Courts payment:',
+              paymentData
+            );
+          }
+          courtsTableData.push([
+            signUpDate,
+            fullName,
+            cardNo,
+            'Unknown Member', // Tipo de membresía para miembros de Courts
+            netRevenue,
+            'Courts', // Tipo de pago
+          ]);
         } else {
           console.error(
             'Invalid memberType for Courts payment:',
@@ -1003,6 +1035,83 @@ const generateDailyReport = async (req, res) => {
       }
     } catch (error) {
       console.error('Error generating Courts table:', error);
+      // Manejar el error apropiadamente
+    }
+
+    try {
+      // Generar la tabla de Courts
+      const courtsPaymentsSnapshot = await admin
+        .firestore()
+        .collection('paymentHistory')
+        .where('gymId', '==', gymId)
+        .where('paymentType', '==', 'prepaidPackage')
+        .where('paymentDate', '==', selectedDate)
+        .get();
+
+      const courtsTableData = [];
+
+      for (const doc of courtsPaymentsSnapshot.docs) {
+        const paymentData = doc.data();
+
+        const signUpDate = paymentData.paymentDate; // Usar el dato que corresponda
+        const netRevenue = `€ ${paymentData.paymentAmount}`;
+
+        if (paymentData.memberType === 'unknownmember') {
+          let cardNo = '';
+          if (paymentData.profileId) {
+            const participant = paymentData;
+            const participantId = participant.profileId;
+
+            const profileSnapshot = await admin
+              .firestore()
+              .collection('profiles')
+              .doc(participantId)
+              .get();
+
+            const profileData = profileSnapshot.data();
+            fullName = profileData.profileName;
+            cardNo = profileData.cardSerialNumber;
+          } else {
+            console.error(
+              'Participant not found for Prepaid Package payment:',
+              paymentData
+            );
+          }
+          courtsTableData.push([
+            signUpDate,
+            fullName,
+            cardNo,
+            'Unknown Member', // Tipo de membresía para miembros de Courts
+            netRevenue,
+            'Prepaid Package', // Tipo de pago
+          ]);
+        } else {
+          console.error(
+            'Invalid memberType for Prepaid Package payment:',
+            paymentData.memberType
+          );
+        }
+      }
+
+      const courtsTableHeaders = [
+        'Payment Date',
+        'Full Name',
+        'Card No/ Room Number',
+        'Membership Type',
+        'Net Revenue',
+        'Payment Type',
+      ];
+
+      if (courtsTableData.length > 0) {
+        // Verificar si hay suficiente espacio en la página actual
+        if (doc.y + 300 > doc.page.height) {
+          doc.addPage(); // Agregar una nueva página si no hay suficiente espacio
+        }
+
+        generateTable('Prepaid Package', courtsTableData, courtsTableHeaders);
+      }
+    } catch (error) {
+      console.error('Error generating Prepaid Packages table:', error);
       // Manejar el error apropiadamente
     }
 

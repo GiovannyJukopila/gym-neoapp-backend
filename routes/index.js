@@ -15,13 +15,14 @@ const financialRouter = require('./financial.router');
 const adminsRouter = require('./admins.router');
 const courtsRouter = require('./courts.router');
 const supportRouter = require('./support.router');
+const unknownModuleRouter = require('./unknownModule.router');
 
 const router = express.Router();
 //app.use('/api/v1', router);
 router.use('/gyms', gymsRouter);
 router.use('/scan', scanRouter);
 router.use('/memberships', membershipRouter);
-router.use('/profiles', profileRouter); // To ways to use but this is easier to mantein
+router.use('/profiles', profileRouter);
 router.use('/auth', authRouter);
 router.use('/classes', classesRouter);
 router.use('/notification', notificationRouter);
@@ -33,5 +34,6 @@ router.use('/reports', reportsRouter);
 router.use('/financial', financialRouter);
 router.use('/courts', courtsRouter);
 router.use('/support', supportRouter);
+router.use('/unknownModule', unknownModuleRouter);
 
 module.exports = router;

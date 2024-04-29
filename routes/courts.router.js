@@ -11,6 +11,7 @@ const {
   getallSession,
   updateSession,
   deleteSession,
+  getTodaysCourts,
   removeParticipant,
   cancelClass,
 } = require('../controllers/courtsController');
@@ -19,6 +20,7 @@ const router = express.Router();
 
 router.get('/getall', verifyToken, getAllCourts);
 router.get('/getallSession', verifyToken, getallSession);
+router.get('/todaysCourts/:gymId', verifyToken, getTodaysCourts);
 
 router.post('/create', verifyToken, createCourt);
 router.post('/createSession', verifyToken, createSession);
