@@ -538,7 +538,18 @@ const sendUnknownMemberAttendance = async (req, res) => {
     if (selectedOption === 'class') {
       const classId = selectedValue.classId;
       activityId = classId;
-      const unknownClassCapacity = selectedValue?.unknownClassCapacity;
+      const unknownClassCapacity = selectedValue?.unknownClassCapacity
+        ? selectedValue?.unknownClassCapacity
+        : 0;
+
+      const isUndefinedUnknownClassCapacity =
+        selectedValue?.unknownClassCapacity ?? 0;
+
+      if (!isUndefinedUnknownClassCapacity) {
+        return res.status(400).json({
+          message: 'There are no available slots in the selected class',
+        });
+      }
 
       let remainingCapacity;
       if (
@@ -566,7 +577,12 @@ const sendUnknownMemberAttendance = async (req, res) => {
       }
 
       // Verificar si el perfil de la persona ya está en unknownParticipants
-      const isParticipantExist = selectedValue.unknownParticipants.some(
+      let unknownParticipants =
+        selectedValue && selectedValue.unknownParticipants
+          ? [...selectedValue.unknownParticipants]
+          : [];
+
+      const isParticipantExist = unknownParticipants.some(
         (participant) => participant.profileId === profileDetails.profileId
       );
 
