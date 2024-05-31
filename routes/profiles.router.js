@@ -2,6 +2,7 @@ const express = require('express');
 const {
   getAllProfiles,
   getProfile,
+  getCardDetail,
   searchProfile,
   getProfileByEmail,
   createProfile,
@@ -30,6 +31,8 @@ const serviceAccount = require('../cred.json');
 router.get('/get/all', getAllProfiles);
 
 router.get('/get/:id', getProfile);
+
+router.get('/getCardDetail/:cardNumber', verifyToken, getCardDetail);
 
 router.get('/search', searchProfile);
 

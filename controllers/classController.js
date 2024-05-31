@@ -697,9 +697,47 @@ const getTodaysClasses = async (req, res) => {
   }
 };
 
+const getWeekClasses = async (req, res) => {
+  try {
+    const gymId = req.params.gymId;
+    const filterDate = req.query.initialDate;
+
+    // Convertir filterDate a un objeto Moment
+    const initialDate = moment(filterDate);
+
+    // Calcular la fecha de inicio de la semana (domingo)
+    const startOfWeek = initialDate.clone().startOf('week');
+
+    // Calcular la fecha de finalización de la semana (sábado)
+    const endOfWeek = initialDate.clone().endOf('week');
+
+    const classesRef = admin.firestore().collection('classes');
+
+    // Consultar las clases filtradas por gymId y eventDate
+    const snapshot = await classesRef
+      .where('gymId', '==', gymId)
+      .where('eventDate', '>=', startOfWeek.format('YYYY-MM-DD'))
+      .where('eventDate', '<=', endOfWeek.format('YYYY-MM-DD'))
+      .get();
+
+    // Extraer los datos de los documentos encontrados
+    const classesWithinWeek = [];
+    snapshot.forEach((doc) => {
+      classesWithinWeek.push(doc.data());
+    });
+
+    // Devolver las clases encontradas en la respuesta
+    res.status(200).json(classesWithinWeek);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
 module.exports = {
   createClass,
   getAllClasses,
+  getWeekClasses,
   deleteClass,
   deleteAllClasses,
   updateClass,

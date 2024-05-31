@@ -1083,9 +1083,38 @@ const searchProfile = async (req, res) => {
   }
 };
 
+const getCardDetail = async (req, res) => {
+  try {
+    const cardSerialNumber = req.params.cardNumber; // Obtén el número de tarjeta de los parámetros de la solicitud
+    const profilesRef = db.collection('cards');
+
+    // Realiza la consulta para obtener el perfil con el cardSerialNumber y el unknownMemberStatus igual a 'active'
+    const querySnapshot = await profilesRef
+      .where('cardSerialNumber', '==', cardSerialNumber)
+      .get();
+
+    if (querySnapshot.empty) {
+      // Si no se encontró ningún perfil que cumpla con los criterios de búsqueda
+
+      return res.status(404).json({ error: 'Perfil no encontrado' });
+    }
+
+    // Se encontró al menos un perfil que cumple con los criterios de búsqueda
+    // En este ejemplo, asumiendo que solo hay un perfil con este cardSerialNumber y unknownMemberStatus 'active'
+    const profileData = querySnapshot.docs[0].data();
+
+    // Responde con los detalles del perfil encontrado
+    res.status(200).json({ profile: profileData });
+  } catch (error) {
+    console.error('Error al obtener detalles de la tarjeta:', error);
+    res.status(500).json({ error: 'Error al obtener detalles de la tarjeta' });
+  }
+};
+
 module.exports = {
   getAllProfiles,
   getProfile,
+  getCardDetail,
   searchProfile,
   createProfile,
   updateProfile,

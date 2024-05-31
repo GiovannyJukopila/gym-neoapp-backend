@@ -16,6 +16,7 @@ const adminsRouter = require('./admins.router');
 const courtsRouter = require('./courts.router');
 const supportRouter = require('./support.router');
 const unknownModuleRouter = require('./unknownModule.router');
+const usersInterfaceRouter = require('./usersInterface.router');
 
 const router = express.Router();
 //app.use('/api/v1', router);
@@ -35,5 +36,6 @@ router.use('/financial', financialRouter);
 router.use('/courts', courtsRouter);
 router.use('/support', supportRouter);
 router.use('/unknownModule', unknownModuleRouter);
+router.use('/users', usersInterfaceRouter);
 
 module.exports = router;

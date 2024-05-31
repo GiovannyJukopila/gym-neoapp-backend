@@ -10,8 +10,8 @@ const worksheet = workbook.addWorksheet('Cards');
 
 cardsRef
   .where('gymId', '==', gymIdToFilter)
-  .where('cardSerialNumber', '>=', `23-MAR-1000`)
-  .where('cardSerialNumber', '<=', `23-MAR-1999`)
+  .where('cardSerialNumber', '>=', `NMP-MAR-000`)
+  .where('cardSerialNumber', '<=', `NMP-MAR-200`)
   .get()
   .then((snapshot) => {
     const filteredCards = [];
@@ -21,8 +21,8 @@ cardsRef
 
     // Configuración de las columnas del archivo Excel
     worksheet.columns = [
-      { header: 'cardSerialNumber', key: 'cardSerialNumber' },
-      { header: 'qrImage', key: 'qrImage' },
+      { header: 'cardSerialNumber', key: 'cardSerialNumber', width: 15 },
+      { header: 'qrImage', key: 'qrImage', width: 15 },
     ];
 
     // Llena el archivo Excel con los datos filtrados

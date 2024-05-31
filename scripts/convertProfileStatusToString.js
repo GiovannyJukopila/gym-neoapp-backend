@@ -33,5 +33,5 @@ async function updateProfilesByGymId(gymId) {
 }
 
 // Llamar a la función para actualizar los perfiles filtrando por gymId
-const gymId = 'gym-test'; // Reemplazar 'ID_DEL_GYM' con el ID del gimnasio deseado
+const gymId = 'marriot-1'; // Reemplazar 'ID_DEL_GYM' con el ID del gimnasio deseado
 updateProfilesByGymId(gymId);

@@ -39,22 +39,34 @@ const submitForm = async (req, res) => {
     const profileQuery = profilesRef.where('profileEmail', '==', email);
     const profileSnapshot = await profileQuery.get();
 
+    const unknownMemberEmailQuery = profilesRef.where(
+      'unknownMemberEmail',
+      '==',
+      email
+    );
+
+    const unknownMemberEmailSnapshot = await unknownMemberEmailQuery.get();
+    const allSnapshots = [
+      ...profileSnapshot.docs,
+      ...unknownMemberEmailSnapshot.docs,
+    ];
+
     // Verifica si se encontró algún documento que coincida con el correo electrónico
-    if (profileSnapshot.empty) {
+    if (allSnapshots.length === 0) {
       return res
         .status(404)
         .json({ isValid: false, error: 'Perfil no encontrado' });
     }
 
     // Se asume que solo hay un documento que coincide con el correo electrónico
-    const profileDoc = profileSnapshot.docs[0].ref; // Obtén el documento
+    const profileDoc = allSnapshots[0].ref; // Obtén el documento
 
     // Genera una sal aleatoria
     const salt = crypto.randomBytes(16).toString('hex');
     const hashedPassword = hashPassword(password, salt);
 
     // Obtén el perfil existente
-    const profileData = profileSnapshot.docs[0].data();
+    const profileData = allSnapshots[0].data();
 
     if (profileData.profileUsername) {
       const hashedLikeLastPassword = hashPassword(password, profileData.salt);
@@ -332,16 +344,27 @@ const validateEmail = async (req, res) => {
 
   try {
     // Realiza una consulta a la colección 'profiles'
-    const querySnapshot = await db
+    const profileEmailSnapshot = await db
       .collection('profiles')
       .where('profileEmail', '==', email)
       .get();
 
+    const unknownMemberEmailSnapshot = await db
+      .collection('profiles')
+      .where('unknownMemberEmail', '==', email)
+      .where('unknownMemberStatus', '==', 'active')
+      .where('cardSerialNumber', '!=', '')
+      .get();
+
+    const allSnapshots = [
+      ...profileEmailSnapshot.docs,
+      ...unknownMemberEmailSnapshot.docs,
+    ];
     // Comprueba si se encontraron documentos
-    if (!querySnapshot.empty) {
+    if (allSnapshots.length > 0) {
       // El correo existe en la plataforma
       // Check if 'profileUsername' exists in the first document (assuming there is only one)
-      const profileData = querySnapshot.docs[0].data();
+      const profileData = allSnapshots[0].data();
       if (profileData.profileUsername?.length >= 1) {
         const verificationCode = generateVerificationCode();
 
