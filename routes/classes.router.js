@@ -9,6 +9,7 @@ const {
   addUnknownParticipants,
   createClass,
   updateClass,
+  generateClassReport,
   deleteClass,
   deleteAllClasses,
   removeParticipant,
@@ -35,6 +36,8 @@ router.post('/addUnknownParticipants', verifyToken, addUnknownParticipants);
 router.post('/create', verifyToken, createClass);
 
 router.post('/update', verifyToken, updateClass);
+
+router.post('/generateClassReport/:gymId', verifyToken, generateClassReport);
 
 router.post('/cancelClass', verifyToken, cancelClass);
 

@@ -4,6 +4,8 @@ const { db } = require('../firebase');
 const bodyParser = require('body-parser');
 const admin = require('firebase-admin');
 const moment = require('moment');
+const PDFDocument = require('pdfkit-table');
+const { format, parseISO } = require('date-fns');
 app.use(bodyParser.json());
 
 const createClass = async (req, res) => {
@@ -705,11 +707,20 @@ const getWeekClasses = async (req, res) => {
     // Convertir filterDate a un objeto Moment
     const initialDate = moment(filterDate);
 
-    // Calcular la fecha de inicio de la semana (domingo)
-    const startOfWeek = initialDate.clone().startOf('week');
+    // Calcular la fecha de inicio de la semana (lunes a las 12 AM)
+    let startOfWeek = initialDate
+      .clone()
+      .startOf('week')
+      .add(1, 'days')
+      .startOf('day');
 
-    // Calcular la fecha de finalización de la semana (sábado)
-    const endOfWeek = initialDate.clone().endOf('week');
+    // Calcular la fecha de finalización de la semana (domingo a las 11:59 PM)
+    let endOfWeek = initialDate.clone().endOf('week').endOf('day');
+
+    // Ajustar el inicio de la semana a partir del día actual si no es lunes
+    if (initialDate.isAfter(startOfWeek)) {
+      startOfWeek = initialDate.clone().startOf('day');
+    }
 
     const classesRef = admin.firestore().collection('classes');
 
@@ -734,6 +745,270 @@ const getWeekClasses = async (req, res) => {
   }
 };
 
+const formatEventDateTime = (eventDate, startDate, endDate) => {
+  if (!eventDate || !startDate || !endDate) {
+    return '';
+  }
+
+  try {
+    const formattedEventDate = format(parseISO(eventDate), 'EEEE, MMMM d, y');
+    const formattedStartTime = format(
+      parseISO(`1970-01-01T${startDate}`),
+      'h:mm a'
+    );
+    const formattedEndTime = format(
+      parseISO(`1970-01-01T${endDate}`),
+      'h:mm a'
+    );
+
+    return `${formattedEventDate} - From ${formattedStartTime} to ${formattedEndTime}`;
+  } catch (error) {
+    console.error('Error formatting date:', error);
+    return '';
+  }
+};
+
+const generateClassReport = async (req, res) => {
+  const { gymId } = req.params;
+  const { classId } = req.body;
+
+  try {
+    // Busca el documento de la clase por classId en la colección de classes
+    const classDoc = await db.collection('classes').doc(classId).get();
+
+    if (!classDoc.exists) {
+      return res.status(404).json({ message: 'Class not found' });
+    }
+
+    const classData = classDoc.data();
+
+    const formattedEventDateTime = formatEventDateTime(
+      classData.eventDate,
+      classData.startTime,
+      classData.endTime
+    );
+    const participants = classData.participants || [];
+    const unknownParticipants = classData.unknownParticipants || [];
+
+    // Obtén los datos de los perfiles de los participantes
+    const participantsPromises = participants.map((participant) =>
+      db.collection('profiles').doc(participant.profileId).get()
+    );
+    const participantDocs = await Promise.all(participantsPromises);
+    const participantProfiles = participantDocs.map((doc) => doc.data());
+
+    // Obtén los datos de los perfiles de los non members
+    const unknownParticipantsPromises = unknownParticipants.map((participant) =>
+      db.collection('profiles').doc(participant.profileId).get()
+    );
+    const unknownParticipantDocs = await Promise.all(
+      unknownParticipantsPromises
+    );
+    const unknownParticipantProfiles = unknownParticipantDocs.map((doc) =>
+      doc.data()
+    );
+
+    // Obtén los profileIds de los no miembros que asistieron desde attendanceHistory
+    const attendanceQuerySnapshot = await db
+      .collection('attendanceHistory')
+      .where('activityId', '==', classId)
+      .get();
+
+    const nonMemberAttendanceData = attendanceQuerySnapshot.docs.map((doc) => ({
+      profileId: doc.data().profileId,
+      attendanceDate: doc.data().attendanceDate,
+      currentCredit: doc.data().currentCredit,
+      cardSerialNumber: doc.data().cardSerialNumber,
+    }));
+
+    const nonMemberAttendanceProfileIds = attendanceQuerySnapshot.docs.map(
+      (doc) => doc.data().profileId
+    );
+
+    // Filtra los participantes no miembros para obtener solo los que asistieron
+    const nonMemberParticipants = unknownParticipants.filter((participant) =>
+      nonMemberAttendanceProfileIds.includes(participant.profileId)
+    );
+
+    // Obtén los datos de los perfiles de los no miembros que asistieron
+    const nonMemberProfilesPromises = nonMemberParticipants.map((participant) =>
+      db.collection('profiles').doc(participant.profileId).get()
+    );
+    const nonMemberProfilesDocs = await Promise.all(nonMemberProfilesPromises);
+    const nonMemberProfilesData = nonMemberProfilesDocs
+      .map(
+        (doc) => (doc.exists ? doc.data() : null) // Manejo de documentos vacíos
+      )
+      .filter((profile) => profile !== null); // Filtrar perfiles nulos
+
+    // Crear un nuevo documento PDF
+    const doc = new PDFDocument();
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'inline; filename="class_report.pdf"');
+    doc.pipe(res);
+
+    // Encabezado del documento
+    doc.rect(0, 0, 612, 80).fill('#FFA500');
+    // Encabezado del documento
+    doc.rect(0, 0, 612, 80).fill('#FFA500');
+    doc
+      .fontSize(25)
+      .fill('white')
+      .text(`CLASS REPORT - ${classData.className}`, 50, 30, {
+        align: 'left',
+        valign: 'center',
+      });
+
+    // Información de la clase
+    doc.fontSize(18).text(`${formattedEventDateTime}`, {
+      bold: true,
+    });
+
+    doc.moveDown(); // Mover más abajo
+    doc.fillColor('black');
+    doc.fontSize(12); // Cambiar color a negro
+    doc.text(`• Total Members Participants: ${participants.length}`);
+    doc.text(`• Total Non-Members Participants: ${unknownParticipants.length}`);
+    doc.moveDown();
+
+    // Tabla de miembros participantes
+    if (participantProfiles.length > 0) {
+      const membersTableData = participantProfiles.map((profile) => [
+        `${profile.profileName || 'N/A'} ${profile.profileLastname || 'N/A'}`,
+        profile.profileEmail || 'N/A',
+        profile.cardSerialNumber || 'N/A',
+        profile.profileTelephoneNumber || 'N/A',
+      ]);
+
+      const membersTableHeaders = [
+        'Name',
+        'Email',
+        'Card Serial Number',
+        'Telephone',
+      ];
+
+      await generateTable(
+        'Members Participants',
+        membersTableHeaders,
+        membersTableData,
+        doc
+      );
+      doc.moveDown();
+    }
+
+    // Tabla de no miembros participantes
+    if (unknownParticipantProfiles.length > 0) {
+      const unknownTableData = unknownParticipantProfiles.map((profile) => [
+        `${profile.profileName || 'N/A'}`,
+        profile.unknownMemberEmail || 'N/A',
+        profile.cardSerialNumber || 'N/A',
+        profile.unknownMemberPhoneNumber || 'N/A',
+      ]);
+
+      const unknownTableHeaders = [
+        'Name',
+        'Email',
+        'Card Serial Number',
+        'Telephone',
+      ];
+
+      await generateTable(
+        'Non-Members Participants',
+        unknownTableHeaders,
+        unknownTableData,
+        doc
+      );
+      doc.moveDown();
+    }
+
+    // Tabla de asistencia de no miembros
+    if (nonMemberProfilesData.length > 0) {
+      await generateNonMembersAttendanceTable(
+        nonMemberProfilesData,
+        nonMemberAttendanceData,
+        doc
+      );
+      doc.moveDown();
+    }
+
+    // Finalizar el documento
+    doc.end();
+  } catch (error) {
+    console.error('Error generating class report:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+// Función para generar la tabla de Non-Members Attendance
+// En la función generateNonMembersAttendanceTable
+const generateNonMembersAttendanceTable = async (
+  nonMemberProfilesData,
+  nonMemberAttendanceData,
+  doc
+) => {
+  const nonMembersAttendanceTableData = nonMemberProfilesData.map(
+    (profile, index) => [
+      `${profile.profileName || 'N/A'}`,
+      profile.unknownMemberEmail || 'N/A',
+      'Attended', // Estado de asistencia ajustado según necesidades
+      nonMemberAttendanceData[index].attendanceDate
+        ? formatTimestamp(nonMemberAttendanceData[index].attendanceDate)
+        : 'N/A', // Formatear la fecha de asistencia
+      `${nonMemberAttendanceData[index].currentCredit || 'N/A'}`, // Crédito actual
+      `${nonMemberAttendanceData[index].cardSerialNumber || 'N/A'}`, // Número de tarjeta
+    ]
+  );
+
+  const nonMembersAttendanceTableHeaders = [
+    'Name',
+    'Email',
+    'Attendance Status',
+    'Attendance Date',
+    'Current Credit',
+    'Card Serial Number',
+  ];
+
+  await generateTable(
+    'Non-Members Attendance',
+    nonMembersAttendanceTableHeaders,
+    nonMembersAttendanceTableData,
+    doc
+  );
+};
+
+// Función para generar la tabla genérica
+const generateTable = async (title, headers, rows, doc) => {
+  const table = {
+    title,
+    headers: headers.map((header, i) => ({
+      label: header,
+      property: `header_${i}`,
+      width: 80,
+      renderer: null,
+    })),
+    rows: rows.map((row) => row.map((cell) => String(cell))), // Convertir todos los elementos a cadena
+  };
+
+  doc.table(table, {
+    prepareHeader: () => doc.font('Helvetica-Bold').fontSize(10),
+    prepareRow: (row, indexColumn, indexRow, rectRow, rectCell) => {
+      doc.font('Helvetica').fontSize(10);
+      doc.text(row[`header_${indexColumn}`], rectCell.x + 5, rectCell.y + 5);
+    },
+    borderHorizontalWidths: (i) => 0.8,
+    borderVerticalWidths: (i) => 0.8,
+    borderColor: (i) => (i === -1 ? 'black' : 'gray'),
+    padding: 10,
+    margins: { top: 50, bottom: 50, left: 50, right: 50 },
+  });
+};
+const formatTimestamp = (timestamp) => {
+  if (!timestamp || !timestamp.toDate) {
+    return 'N/A'; // Manejo para casos donde el timestamp no sea válido
+  }
+  const dateObject = timestamp.toDate(); // Convertir el Timestamp a un objeto Date
+  return dateObject.toLocaleString(); // Formatear la fecha como string legible
+};
 module.exports = {
   createClass,
   getAllClasses,
@@ -741,6 +1016,7 @@ module.exports = {
   deleteClass,
   deleteAllClasses,
   updateClass,
+  generateClassReport,
   getTrainers,
   addParticipants,
   removeParticipant,
