@@ -5,7 +5,14 @@ const bodyParser = require('body-parser');
 const jwt = require('jsonwebtoken');
 app.use(bodyParser.json());
 const Profile = require('../models/profile');
-
+const {
+  format,
+  startOfMonth,
+  endOfMonth,
+  addMonths,
+  isValid,
+  isWithinInterval,
+} = require('date-fns');
 const admin = require('firebase-admin');
 
 const getTotalMembers = async (req, res) => {
@@ -385,9 +392,8 @@ const getGuestReport = async (req, res) => {
   }
 };
 
-const getCurrentMembersByMemberships = async (req, res) => {
+const getCurrentMembersByMemberships = async (gymId) => {
   try {
-    const { gymId } = req.params;
     const profilesRef = db.collection('profiles');
     const snapshot = await profilesRef
       .where('gymId', '==', gymId)
@@ -501,16 +507,15 @@ const getCurrentMembersByMemberships = async (req, res) => {
       currentTotalMembers: membership.data.currentTotalMembers,
     }));
 
-    res.status(200).json(updatedMembershipTotals);
+    return updatedMembershipTotals;
   } catch (error) {
     console.error('Error fetching profiles:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    throw new Error('Internal server error');
   }
 };
 
-const setInactiveMembers = async (req, res) => {
+const setInactiveMembers = async (gymId) => {
   try {
-    const { gymId } = req.params;
     const gymSnapshot = await admin
       .firestore()
       .collection('gyms')
@@ -617,11 +622,50 @@ const setInactiveMembers = async (req, res) => {
 
     // Ejecutar la actualización en lote
     await batch.commit();
-
-    res.status(200).json({ message: 'Actualización exitosa' });
   } catch (error) {
     console.error('Error al actualizar perfiles:', error);
-    res.status(500).json({ error: 'Error interno del servidor' });
+    throw new Error('Error interno del servidor');
+  }
+};
+
+const updateTotalAmountByMonth = async (gymId) => {
+  try {
+    const paymentHistoryRef = db.collection('paymentHistory');
+    const snapshot = await paymentHistoryRef.where('gymId', '==', gymId).get();
+
+    const totalAmountByMonth = {};
+    const gymRef = db.collection('gyms').doc(gymId);
+
+    snapshot.forEach((doc) => {
+      const paymentData = doc.data();
+      const paymentDate = paymentData.paymentDate;
+      const amount = paymentData.paymentAmount;
+
+      // Intentar crear un objeto Date
+      const dateObject = new Date(paymentDate);
+
+      // Verificar si la fecha es válida antes de formatearla
+      if (isValid(dateObject)) {
+        const monthYearKey = format(dateObject, 'yyyy-MM');
+
+        if (!totalAmountByMonth[monthYearKey]) {
+          totalAmountByMonth[monthYearKey] = 0;
+        }
+
+        totalAmountByMonth[monthYearKey] += amount;
+      } else {
+        console.warn(`Fecha no válida: ${paymentDate}`);
+      }
+    });
+
+    await gymRef.update({
+      totalAmountByMonth: totalAmountByMonth,
+    });
+
+    return totalAmountByMonth;
+  } catch (error) {
+    console.error('Error fetching payments:', error);
+    throw new Error('Internal server error');
   }
 };
 
@@ -632,4 +676,5 @@ module.exports = {
   getPaymentReport,
   getGuestReport,
   setInactiveMembers,
+  updateTotalAmountByMonth,
 };

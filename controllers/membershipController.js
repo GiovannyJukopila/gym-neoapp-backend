@@ -5,14 +5,6 @@ const bodyParser = require('body-parser');
 const admin = require('firebase-admin');
 const PDFDocument = require('pdfkit-table');
 app.use(bodyParser.json());
-const {
-  format,
-  startOfMonth,
-  endOfMonth,
-  addMonths,
-  isValid,
-  isWithinInterval,
-} = require('date-fns');
 
 const getAllMemberships = async (req, res) => {
   try {
@@ -168,48 +160,6 @@ const getTotalUsersByMonth = async (req, res) => {
     res.status(200).json(userCountsByMonth);
   } catch (error) {
     console.error('Error updating total users by month:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-};
-
-const updateTotalAmountByMonth = async (req, res) => {
-  try {
-    const { gymId } = req.params;
-    const paymentHistoryRef = db.collection('paymentHistory');
-    const snapshot = await paymentHistoryRef.where('gymId', '==', gymId).get();
-
-    const totalAmountByMonth = {};
-    const gymRef = db.collection('gyms').doc(gymId);
-
-    snapshot.forEach((doc) => {
-      const paymentData = doc.data();
-      const paymentDate = paymentData.paymentDate;
-      const amount = paymentData.paymentAmount;
-
-      // Intentar crear un objeto Date
-      const dateObject = new Date(paymentDate);
-
-      // Verificar si la fecha es válida antes de formatearla
-      if (isValid(dateObject)) {
-        const monthYearKey = format(dateObject, 'yyyy-MM');
-
-        if (!totalAmountByMonth[monthYearKey]) {
-          totalAmountByMonth[monthYearKey] = 0;
-        }
-
-        totalAmountByMonth[monthYearKey] += amount;
-      } else {
-        console.warn(`Fecha no válida: ${paymentDate}`);
-      }
-    });
-
-    await gymRef.update({
-      totalAmountByMonth: totalAmountByMonth,
-    });
-
-    res.status(200).json(totalAmountByMonth);
-  } catch (error) {
-    console.error('Error fetching payments:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 };
@@ -412,7 +362,6 @@ module.exports = {
   getMembership,
   getUsersByMonthForMembership,
   getTotalUsersByMonth,
-  updateTotalAmountByMonth,
   createMembership,
   updateMembership,
   deleteMembership,

@@ -4,7 +4,6 @@ const {
   getMembership,
   getUsersByMonthForMembership,
   getTotalUsersByMonth,
-  updateTotalAmountByMonth,
   generateMembershipsReport,
   createMembership,
   updateMembership,
@@ -21,8 +20,6 @@ router.get('/get/:id', getMembership);
 router.get('/:membershipId/users-by-month', getUsersByMonthForMembership);
 
 router.get('/getTotalUsersByMonth/:gymId', getTotalUsersByMonth);
-
-router.get('/updateTotalAmountByMonth/:gymId', updateTotalAmountByMonth);
 
 router.post(
   '/generateMembershipsReport/:gymId',

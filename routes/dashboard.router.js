@@ -7,6 +7,7 @@ const {
   getPaymentReport,
   getGuestReport,
   setInactiveMembers,
+  updateTotalAmountByMonth,
 } = require('../controllers/dashboardController');
 const verifyToken = require('../middlewares/authMiddleware');
 
@@ -20,6 +21,8 @@ router.get('/getCheckInReports/:gymId', getCheckInReport);
 router.get('/getPaymentReport/:gymId', getPaymentReport);
 
 router.get('/getGuestReport/:gymId', getGuestReport);
+
+router.get('/updateTotalAmountByMonth/:gymId', updateTotalAmountByMonth);
 
 router.post('/updateInactiveMembers/:gymId', setInactiveMembers);
 
