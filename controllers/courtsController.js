@@ -1187,69 +1187,34 @@ const getTodaysCourts = async (req, res) => {
       .json({ message: 'Error al obtener las clases del día de hoy' });
   }
 };
-const getCourtsByDate = async (req, res) => {
-  try {
-    const gymId = req.query.gymId;
-    const date = req.query.date;
-
-    if (!gymId || !date) {
-      return res.status(400).json({ message: 'gymId and date are required' });
-    }
-
-    // Convertir la fecha recibida a la zona horaria local y luego a UTC
-    const inputDate = new Date(date);
-    const localDate = new Date(
-      inputDate.getTime() - inputDate.getTimezoneOffset() * 60000
-    );
-    const year = localDate.getUTCFullYear();
-    const month = String(localDate.getUTCMonth() + 1).padStart(2, '0'); // Los meses van de 0 a 11, por eso sumamos 1
-    const day = String(localDate.getUTCDate()).padStart(2, '0');
-    const formattedDate = `${year}-${month}-${day}`;
-
-    // Definir el rango de fechas en UTC
-    const startOfDay = `${formattedDate}T00:00:00.000Z`;
-    const endOfDay = `${formattedDate}T23:59:59.999Z`;
-
-    const courtsSnapshot = await db
-      .collection('sessionHistory')
-      .where('gymId', '==', gymId)
-      .where('eventDate', '>=', startOfDay)
-      .where('eventDate', '<=', endOfDay)
-      .get();
-
-    if (courtsSnapshot.empty) {
-      return res
-        .status(404)
-        .json({ message: 'No courts found for the given date' });
-    }
-
-    const courts = courtsSnapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    }));
-
-    return res.status(200).json(courts);
-  } catch (error) {
-    console.error('Error getting courts by date:', error);
-    return res.status(500).json({ message: 'Internal server error' });
-  }
-};
-
 // const getCourtsByDate = async (req, res) => {
 //   try {
 //     const gymId = req.query.gymId;
 //     const date = req.query.date;
-//     const formattedDate = moment(date).format('YYYY-MM-DD');
 
 //     if (!gymId || !date) {
 //       return res.status(400).json({ message: 'gymId and date are required' });
 //     }
 
+//     // Convertir la fecha recibida a la zona horaria local y luego a UTC
+//     const inputDate = new Date(date);
+//     const localDate = new Date(
+//       inputDate.getTime() - inputDate.getTimezoneOffset() * 60000
+//     );
+//     const year = localDate.getUTCFullYear();
+//     const month = String(localDate.getUTCMonth() + 1).padStart(2, '0'); // Los meses van de 0 a 11, por eso sumamos 1
+//     const day = String(localDate.getUTCDate()).padStart(2, '0');
+//     const formattedDate = `${year}-${month}-${day}`;
+
+//     // Definir el rango de fechas en UTC
+//     const startOfDay = `${formattedDate}T00:00:00.000Z`;
+//     const endOfDay = `${formattedDate}T23:59:59.999Z`;
+
 //     const courtsSnapshot = await db
 //       .collection('sessionHistory')
 //       .where('gymId', '==', gymId)
-//       .where('eventDate', '>=', `${formattedDate}T00:00:00.000Z`)
-//       .where('eventDate', '<=', `${formattedDate}T23:59:59.999Z`)
+//       .where('eventDate', '>=', startOfDay)
+//       .where('eventDate', '<=', endOfDay)
 //       .get();
 
 //     if (courtsSnapshot.empty) {
@@ -1269,6 +1234,43 @@ const getCourtsByDate = async (req, res) => {
 //     return res.status(500).json({ message: 'Internal server error' });
 //   }
 // };
+
+const getCourtsByDate = async (req, res) => {
+  try {
+    const gymId = req.query.gymId;
+    const date = req.query.date;
+
+    const formattedDate = date.split('T')[0];
+    // const formattedDate = moment(date).format('YYYY-MM-DD');
+
+    if (!gymId || !date) {
+      return res.status(400).json({ message: 'gymId and date are required' });
+    }
+
+    const courtsSnapshot = await db
+      .collection('sessionHistory')
+      .where('gymId', '==', gymId)
+      .where('eventDate', '>=', `${formattedDate}T00:00:00.000Z`)
+      .where('eventDate', '<=', `${formattedDate}T23:59:59.999Z`)
+      .get();
+
+    if (courtsSnapshot.empty) {
+      return res
+        .status(404)
+        .json({ message: 'No courts found for the given date' });
+    }
+
+    const courts = courtsSnapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    }));
+
+    return res.status(200).json(courts);
+  } catch (error) {
+    console.error('Error getting courts by date:', error);
+    return res.status(500).json({ message: 'Internal server error' });
+  }
+};
 
 module.exports = {
   createCourt,
