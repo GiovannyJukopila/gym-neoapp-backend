@@ -379,11 +379,66 @@ const deleteClass = async (req, res) => {
   }
 };
 
+const deletePrimaryClass = async (req, res) => {
+  try {
+    const classId = req.params.classId;
+    const db = admin.firestore();
+    const classRef = db.collection('primaryClasses').doc(classId);
+
+    const classDoc = await classRef.get();
+
+    if (!classDoc.exists) {
+      return res.status(404).json({ error: 'Membership not found' });
+    }
+
+    const classData = classDoc.data();
+    const gymId = classData.gymId;
+
+    // Elimina la membresía de la colección "memberships"
+    await classRef.delete();
+
+    if (gymId) {
+      // Si la membresía está asociada a un gimnasio, también elimínala de la colección "memberships" del gimnasio
+
+      // Actualiza el número secuencial en "metadata" del gimnasio si corresponde
+      const metadataRef = db.collection('gyms').doc(gymId);
+      const metadataDoc = await metadataRef.get();
+
+      if (metadataDoc.exists) {
+        const data = metadataDoc.data();
+        const gymPrimaryClasses = data.gymPrimaryClasses - 1;
+
+        await metadataRef.update({ gymPrimaryClasses });
+      }
+    }
+
+    res.status(204).send(); // Respuesta exitosa sin contenido
+  } catch (error) {
+    console.error('Error deleting membership:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
 const updateClass = async (req, res) => {
   try {
     const { classId, formData } = req.body;
 
     const profileRef = db.collection('classes').doc(classId);
+
+    // Actualiza el documento con los datos proporcionados en formData
+    await profileRef.update(formData);
+
+    res.json({ message: 'Profile record updated successfully' });
+  } catch (error) {
+    res.status(400).send(error.message);
+  }
+};
+
+const updatePrimaryClasses = async (req, res) => {
+  try {
+    const { classId, formData } = req.body;
+
+    const profileRef = db.collection('primaryClasses').doc(classId);
 
     // Actualiza el documento con los datos proporcionados en formData
     await profileRef.update(formData);
@@ -1066,13 +1121,133 @@ const formatTimestamp = (timestamp) => {
   const dateObject = timestamp.toDate(); // Convertir el Timestamp a un objeto Date
   return dateObject.toLocaleString(); // Formatear la fecha como string legible
 };
+
+const createPrimaryClasses = async (req, res) => {
+  try {
+    const body = req.body;
+    const gymId = req.query.gymId;
+
+    // Generar el número secuencial para la clase primaria
+    const gymClassSerialNumber = await generatePrimarySequentialNumber(gymId);
+    const classId = `primaryClass-${gymId}-${gymClassSerialNumber}`;
+
+    // Crear un objeto de clase para una única entrada con todos los días de la semana
+    const classObj = {
+      classId: classId,
+      gymId: gymId,
+      className: body.className,
+      startTime: body.startTime,
+      endTime: body.endTime,
+      eventColor: body.eventColor,
+      weekDays: Array.from({ length: 7 }, (_, i) =>
+        body.selectedWeekDays.includes(i)
+      ),
+      selectedWeekDays: body.selectedWeekDays,
+      selectTrainer: body.selectTrainer,
+      limitCapacity: body.limitCapacity,
+      classCapacity: body.classCapacity,
+      description: body.description,
+      unknownClassCapacity: body?.unknownClassCapacity,
+    };
+
+    // Guardar la clase en la base de datos
+    const profilesCollection = db.collection('primaryClasses');
+    const newClassRef = profilesCollection.doc(classId);
+    await newClassRef.set(classObj);
+
+    // Actualizar el número secuencial en la colección de gimnasios
+    const gymsCollection = db.collection('gyms');
+    await gymsCollection.doc(gymId).update({
+      primaryClassLastSerialNumber: gymClassSerialNumber,
+    });
+
+    res.status(201).json({
+      message: 'Primary class created successfully',
+      class: classObj,
+    });
+  } catch (error) {
+    console.error('Error creating primary class:', error);
+    res.status(500).json({
+      message: 'An error occurred while creating the primary class',
+    });
+  }
+};
+
+async function generatePrimarySequentialNumber(gymId) {
+  // Consulta la colección "metadata" para obtener el último número secuencial
+  const metadataRef = db.collection('gyms').doc(gymId);
+  const metadataDoc = await metadataRef.get();
+  let gymPrimaryClasses = 1;
+
+  if (metadataDoc.exists) {
+    const data = metadataDoc.data();
+    gymPrimaryClasses = data.gymPrimaryClasses + 1;
+  }
+
+  // Actualiza el número de secuencia en "metadata"
+  await metadataRef.set({ gymPrimaryClasses }, { merge: true });
+
+  // Devuelve el número secuencial formateado
+  return gymPrimaryClasses;
+}
+
+const getAllprimaryClasses = async (req, res) => {
+  try {
+    const gymId = req.query.gymId;
+
+    // Continúa con tu lógica para obtener perfiles y realizar otras operaciones
+    const offset = parseInt(req.query.offset) || 0;
+    const itemsPerPage = parseInt(req.query.itemsPerPage) || 4;
+
+    const getClassesCollection = db.collection('primaryClasses');
+
+    const response = await getClassesCollection
+      .where('gymId', '==', gymId)
+      .limit(itemsPerPage)
+      .offset(offset)
+      .get();
+
+    const classesArray = [];
+    response.forEach((doc) => {
+      const data = doc.data();
+      const membership = {
+        id: doc.id,
+        classId: data.classId,
+        description: data.description, // Si descriptions no está definido, usar un array vacío
+        gymId: data.gymId, // Si gymId no está definido, usar una cadena vacía
+        classCapacity: data.classCapacity,
+        className: data.className,
+        selectedWeekDays: data.selectedWeekDays,
+        selectTrainer: data.selectTrainer, // Si planName no está definido, usar una cadena vacía
+        startTime: data.startTime,
+        endTime: data.endTime,
+        eventColor: data.eventColor,
+        limitCapacity: data.limitCapacity,
+        weekDays: data.weekDays,
+        unknownClassCapacity: data?.unknownClassCapacity,
+      };
+      classesArray.push(membership);
+    });
+
+    // Envía la respuesta como una matriz de perfiles directamente
+    res.status(200).json(classesArray);
+  } catch (error) {
+    console.error('Error en getAllProfiles:', error);
+    res.status(500).send(error);
+  }
+};
+
 module.exports = {
   createClass,
+  createPrimaryClasses,
   getAllClasses,
+  getAllprimaryClasses,
   getWeekClasses,
   deleteClass,
+  deletePrimaryClass,
   deleteAllClasses,
   updateClass,
+  updatePrimaryClasses,
   generateClassReport,
   getTrainers,
   addParticipants,
