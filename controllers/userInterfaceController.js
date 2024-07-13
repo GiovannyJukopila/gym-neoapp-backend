@@ -308,10 +308,147 @@ const getUnknownMemberCourtsByProfileId = async (req, res) => {
   }
 };
 
+const getmemberCourtsByProfileId = async (req, res) => {
+  try {
+    const { gymId, profileId } = req.body;
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0); // Establecer a medianoche
+    const todayISOString = today.toISOString();
+
+    const classesRef = db.collection('sessionHistory');
+    const snapshot = await classesRef
+      .where('gymId', '==', gymId)
+      .where('eventDate', '>=', todayISOString)
+      .get();
+
+    if (snapshot.empty) {
+      return res
+        .status(404)
+        .json({ message: 'No courts found for the specified criteria.' });
+    }
+
+    const courts = [];
+    snapshot.forEach((doc) => {
+      const courtData = doc.data();
+      // Verificar si el profileId está en el array de unknownParticipants, si existe
+      if (
+        courtData.participants &&
+        courtData.participants.some(
+          (participant) => participant.profileId === profileId
+        )
+      ) {
+        courts.push(courtData);
+      }
+    });
+
+    return res.status(200).json(courts);
+  } catch (error) {
+    console.error(`Error getting courts: ${error}`);
+    return res.status(500).json({ message: 'Error getting courts', error });
+  }
+};
+
+const cancelMemberClass = async (req, res) => {
+  const { gymId, profileId, classId, role } = req.body;
+
+  try {
+    // Referencia a la clase
+    const classRef = db.collection('classes').doc(classId);
+    const classDoc = await classRef.get();
+
+    if (!classDoc.exists) {
+      return res.status(404).json({ error: 'Class not found' });
+    }
+
+    const classData = classDoc.data();
+
+    if (role === 'member') {
+      // Eliminar miembro del array de participants
+      const updatedParticipants = classData.participants.filter(
+        (participant) => participant.profileId !== profileId
+      );
+
+      await classRef.update({
+        participants: updatedParticipants,
+        currentClassParticipants: classData.currentClassParticipants - 1,
+      });
+
+      return res.status(200).json({ message: 'Member removed from class' });
+    } else if (role === 'unknownMember') {
+      // Eliminar miembro del array de unknownParticipants
+      const updatedUnknownParticipants = classData.unknownParticipants.filter(
+        (participant) => participant.profileId !== profileId
+      );
+      await classRef.update({
+        unknownParticipants: updatedUnknownParticipants,
+        currentUnkwnownClassParticipants:
+          classData.currentUnkwnownClassParticipants - 1,
+      });
+
+      // // Referencia al perfil del usuario
+      // const profileRef = db.collection('profiles').doc(profileId);
+      // const profileDoc = await profileRef.get();
+
+      // if (!profileDoc.exists) {
+      //   return res.status(404).json({ error: 'Profile not found' });
+      // }
+
+      // const profileData = profileDoc.data();
+
+      // // Devolver crédito si deductedAtBooking es true
+      // if (profileData.selectedPackage.deductedAtBooking) {
+      //   await profileRef.update({
+      //     'selectedPackage.currentCredit':
+      //       profileData.selectedPackage.currentCredit + 1,
+      //   });
+      // }
+
+      return res.status(200).json({
+        message: 'Unknown member removed from class',
+      });
+    } else {
+      return res.status(400).json({ error: 'Invalid role' });
+    }
+  } catch (error) {
+    console.error('Error canceling member class:', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+const cancelMemberCourt = async (req, res) => {
+  const { gymId, profileId, courtId, role } = req.body;
+
+  try {
+    // Referencia al documento de la cancha
+    const courtRef = db.collection('sessionHistory').doc(courtId);
+
+    // Verificar si el documento existe
+    const courtDoc = await courtRef.get();
+
+    if (!courtDoc.exists) {
+      return res.status(404).json({ error: 'Court not found' });
+    }
+
+    // Eliminar el documento de la cancha
+    await courtRef.delete();
+
+    return res
+      .status(200)
+      .json({ message: 'Court session canceled and document deleted' });
+  } catch (error) {
+    console.error('Error canceling member court:', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
 module.exports = {
   addClassUnknownParticipants,
   addClassParticipants,
+  cancelMemberClass,
+  cancelMemberCourt,
   getUnknownMemberClassesByProfileId,
   getmemberClassesByProfileId,
   getUnknownMemberCourtsByProfileId,
+  getmemberCourtsByProfileId,
 };

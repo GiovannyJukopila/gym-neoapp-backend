@@ -68,7 +68,7 @@ const submitForm = async (req, res) => {
     // Obtén el perfil existente
     const profileData = allSnapshots[0].data();
 
-    if (profileData.profileUsername) {
+    if (profileData?.profilePassword?.length > 0) {
       const hashedLikeLastPassword = hashPassword(password, profileData.salt);
       // El usuario ya tiene un 'profileUsername'
       if (profileData.profilePassword === hashedLikeLastPassword) {
@@ -79,11 +79,6 @@ const submitForm = async (req, res) => {
             'Error setting up your password. Please check if the new password is the same as the previous one',
         });
       }
-    } else if (username.length > 0) {
-      // Actualiza el 'profileUsername' solo si no existe o si el nuevo nombre es diferente
-      await profileDoc.update({
-        profileUsername: username,
-      });
     }
 
     // Actualiza la contraseña si es diferente o si no tenía 'profileUsername'
@@ -117,219 +112,127 @@ const getlogIn = async (req, res) => {
     // Verifica si el identificador es un email
     const isEmail = /\S+@\S+\.\S+/.test(identifier);
 
-    if (isEmail) {
-      // Intenta buscar el perfil por el correo electrónico
-      const profileRef = db
-        .collection('profiles')
-        .where('profileEmail', '==', identifier);
-      const profileSnapshot = await profileRef.get();
+    // Intenta buscar el perfil por el correo electrónico
+    const profileRef = db
+      .collection('profiles')
+      .where('profileEmail', '==', identifier);
+    const unknownMemberRef = db
+      .collection('profiles')
+      .where('unknownMemberEmail', '==', identifier);
 
-      if (profileSnapshot.empty) {
-        return res.status(401).json({ error: 'Credenciales incorrectas' });
-      }
+    const [profileSnapshot, unknownMemberSnapshot] = await Promise.all([
+      profileRef.get(),
+      unknownMemberRef.get(),
+    ]);
 
-      // Obtén el primer perfil que coincida
-      const profileDoc = profileSnapshot.docs[0];
-      profileData = profileDoc.data();
+    if (profileSnapshot.empty && unknownMemberSnapshot.empty) {
+      return res.status(401).json({ error: 'Credenciales incorrectas' });
+    }
 
-      const gymId = profileData.gymId;
-      const gymRef = db.collection('gyms').doc(gymId);
-      const gymSnapShot = await gymRef.get();
-      const gymData = gymSnapShot.data();
-      const gymEndDate = gymData.gymEndDate;
-      const activeModules = gymData.activeModules;
+    const profiles = new Map();
 
-      const currentDate = new Date();
-      const endDate = new Date(gymEndDate);
+    profileSnapshot.forEach((doc) => {
+      profiles.set(doc.id, doc.data());
+    });
 
-      if (endDate < currentDate) {
-        return res.status(404).json({
-          changepassword: false,
-          error: 'The membership period has expired.',
-        });
-        // Realizar acciones adicionales aquí si el período ha expirado
-      }
+    unknownMemberSnapshot.forEach((doc) => {
+      profiles.set(doc.id, doc.data());
+    });
+    profileData = Array.from(profiles.values())[0];
 
-      const hashedPassword = hashPassword(password, profileData.salt);
+    const gymId = profileData.gymId;
+    const gymRef = db.collection('gyms').doc(gymId);
+    const gymSnapShot = await gymRef.get();
+    const gymData = gymSnapShot.data();
+    const gymEndDate = gymData.gymEndDate;
+    const activeModules = gymData.activeModules;
 
-      // Compara el hash calculado con el hash almacenado en el perfil
-      if (hashedPassword !== profileData.profilePassword) {
-        return res
-          .status(401)
-          .json({ changepassword: false, error: 'Incorrect credentials' });
-      }
+    const currentDate = new Date();
+    const endDate = new Date(gymEndDate);
 
-      const secretKey = process.env.ACCESS_TOKEN_SECRET;
+    if (endDate < currentDate) {
+      return res.status(404).json({
+        changepassword: false,
+        error: 'The membership period has expired.',
+      });
+      // Realizar acciones adicionales aquí si el período ha expirado
+    }
 
-      const token = jwt.sign(
-        {
-          profileId: profileData.profileId,
-        },
-        secretKey
+    const hashedPassword = hashPassword(password, profileData.salt);
+
+    // Compara el hash calculado con el hash almacenado en el perfil
+    if (hashedPassword !== profileData.profilePassword) {
+      return res
+        .status(401)
+        .json({ changepassword: false, error: 'Incorrect credentials' });
+    }
+
+    const secretKey = process.env.ACCESS_TOKEN_SECRET;
+
+    const token = jwt.sign(
+      {
+        profileId: profileData.profileId,
+      },
+      secretKey
+    );
+
+    if (
+      profileData.profileIsAdmin ||
+      (profileData.role &&
+        profileData.role.length === 1 &&
+        profileData.role[0] === 'trainer')
+    ) {
+      // const currentDate = new Date();
+      // const passwordCreationDate = new Date(profileData.passwordCreationDate);
+      // const daysDifference = Math.floor(
+      //   (currentDate - passwordCreationDate) / (1000 * 60 * 60 * 24)
+      // );
+
+      // If less than 1 minute has passed and it's an administrator, show an error
+      // if (daysDifference > 30) {
+      //   return res.status(401).json({
+      //     changepassword: true,
+      //     error: 'You must change your password before logging in.',
+      //   });
+      // } else {
+      const verificationCode = generateVerificationCode();
+
+      // Envía el código de verificación por correo electrónico
+      await sendVerificationCodeByEmail(
+        profileData.profileEmail,
+        verificationCode
       );
 
-      if (
-        profileData.profileIsAdmin ||
-        (profileData.role &&
-          profileData.role.length === 1 &&
-          profileData.role[0] === 'trainer')
-      ) {
-        // const currentDate = new Date();
-        // const passwordCreationDate = new Date(profileData.passwordCreationDate);
-        // const daysDifference = Math.floor(
-        //   (currentDate - passwordCreationDate) / (1000 * 60 * 60 * 24)
-        // );
-
-        // If less than 1 minute has passed and it's an administrator, show an error
-        // if (daysDifference > 30) {
-        //   return res.status(401).json({
-        //     changepassword: true,
-        //     error: 'You must change your password before logging in.',
-        //   });
-        // } else {
-        const verificationCode = generateVerificationCode();
-
-        // Envía el código de verificación por correo electrónico
-        await sendVerificationCodeByEmail(
-          profileData.profileEmail,
-          verificationCode
-        );
-
-        // Guarda el código de verificación en Firestore (o en tu base de datos)
-        await saveVerificationCodeInFirestore(
-          profileData.profileEmail,
-          verificationCode
-        );
-        // 'profileUsername' exists
-        res.status(200).json({
-          email: profileData.profileEmail,
-          profileIsAdmin: profileData.profileIsAdmin,
-          profileIsTrainer: profileData.role,
-        });
-        //}
-      } else {
-        const responseData = {
-          message: 'Autenticación exitosa',
-          // Otros datos de usuario que desees incluir
-          profileIsAdmin: profileData.profileIsAdmin,
-          token,
-          profileId: profileData.profileId,
-          profileName: profileData.profileName,
-          profileLastname: profileData.profileLastname,
-          profilePicture: profileData.profilePicture,
-          membershipId: profileData.membershipId,
-          profileAdminLevel: profileData.profileAdminLevel,
-          gymId: profileData.gymId,
-          profileIsTrainer: profileData.role,
-          activeModules: activeModules,
-          // ...
-        };
-        return res.status(200).json(responseData);
-      }
+      // Guarda el código de verificación en Firestore (o en tu base de datos)
+      await saveVerificationCodeInFirestore(
+        profileData.profileEmail,
+        verificationCode
+      );
+      // 'profileUsername' exists
+      res.status(200).json({
+        email: profileData.profileEmail,
+        profileIsAdmin: profileData.profileIsAdmin,
+        profileIsTrainer: profileData.role,
+      });
+      //}
     } else {
-      // Intenta buscar el perfil por el nombre de usuario
-      const profileRef = db
-        .collection('profiles')
-        .where('profileUsername', '==', identifier);
-      const profileSnapshot = await profileRef.get();
-
-      if (profileSnapshot.empty) {
-        return res
-          .status(401)
-          .json({ changepassword: false, error: 'Credenciales incorrectas' });
-      }
-
-      // Obtén el primer perfil que coincida
-      const profileDoc = profileSnapshot.docs[0];
-      profileData = profileDoc.data();
-
-      const gymId = profileData.gymId;
-      const gymRef = db.collection('gyms').doc(gymId);
-      const gymSnapShot = await gymRef.get();
-      const gymData = gymSnapShot.data();
-      const gymEndDate = gymData.gymEndDate;
-
-      const currentDate = new Date();
-      const endDate = new Date(gymEndDate);
-
-      if (endDate < currentDate) {
-        return res.status(404).json({
-          changepassword: false,
-          error: 'The membership period has expired.',
-        });
-        // Realizar acciones adicionales aquí si el período ha expirado
-      }
-
-      const hashedPassword = hashPassword(password, profileData.salt);
-
-      // Compara el hash calculado con el hash almacenado en el perfil
-      if (hashedPassword !== profileData.profilePassword) {
-        return res
-          .status(401)
-          .json({ changepassword: false, error: 'Credenciales incorrectas' });
-      }
-
-      const secretKey = process.env.ACCESS_TOKEN_SECRET;
-
-      const token = jwt.sign(
-        {
-          profileId: profileData.profileId,
-        },
-        secretKey
-      );
-
-      if (profileData.profileIsAdmin || profileData.role === 'trainer') {
-        const currentDate = new Date();
-        const passwordCreationDate = new Date(profileData.passwordCreationDate);
-        const daysDifference = Math.floor(
-          (currentDate - passwordCreationDate) / (1000 * 60 * 60 * 24)
-        );
-
-        // If less than 1 minute has passed and it's an administrator, show an error
-        if (daysDifference > 30) {
-          return res.status(401).json({
-            changepassword: true,
-            error: 'You must change your password before logging in.',
-          });
-        } else {
-          const verificationCode = generateVerificationCode();
-
-          // Envía el código de verificación por correo electrónico
-          await sendVerificationCodeByEmail(
-            profileData.profileEmail,
-            verificationCode
-          );
-
-          // Guarda el código de verificación en Firestore (o en tu base de datos)
-          await saveVerificationCodeInFirestore(
-            profileData.profileEmail,
-            verificationCode
-          );
-          // 'profileUsername' exists
-          res.status(200).json({
-            email: profileData.profileEmail,
-            profileIsAdmin: profileData.profileIsAdmin,
-            profileIsTrainer: profileData.role,
-          });
-        }
-      } else {
-        const responseData = {
-          message: 'Autenticación exitosa',
-          // Otros datos de usuario que desees incluir
-          profileIsAdmin: profileData.profileIsAdmin,
-          token,
-          profileId: profileData.profileId,
-          profileName: profileData.profileName,
-          profileLastname: profileData.profileLastname,
-          profilePicture: profileData.profilePicture,
-          membershipId: profileData.membershipId,
-          profileAdminLevel: profileData.profileAdminLevel,
-          gymId: profileData.gymId,
-          profileIsTrainer: profileData.role,
-          // ...
-        };
-        return res.status(200).json(responseData);
-      }
+      const responseData = {
+        message: 'Autenticación exitosa',
+        // Otros datos de usuario que desees incluir
+        profileIsAdmin: profileData.profileIsAdmin,
+        token,
+        profileId: profileData.profileId,
+        profileName: profileData.profileName,
+        profileLastname: profileData.profileLastname,
+        profilePicture: profileData.profilePicture,
+        membershipId: profileData.membershipId,
+        profileAdminLevel: profileData.profileAdminLevel,
+        gymId: profileData.gymId,
+        profileIsTrainer: profileData.role,
+        activeModules: activeModules,
+        // ...
+      };
+      return res.status(200).json(responseData);
     }
 
     // Hashea la contraseña proporcionada con la sal almacenada en el perfil
@@ -347,6 +250,7 @@ const validateEmail = async (req, res) => {
     const profileEmailSnapshot = await db
       .collection('profiles')
       .where('profileEmail', '==', email)
+      .where('profileStatus', '==', 'true')
       .get();
 
     const unknownMemberEmailSnapshot = await db
@@ -362,30 +266,15 @@ const validateEmail = async (req, res) => {
     ];
     // Comprueba si se encontraron documentos
     if (allSnapshots.length > 0) {
-      // El correo existe en la plataforma
-      // Check if 'profileUsername' exists in the first document (assuming there is only one)
-      const profileData = allSnapshots[0].data();
-      if (profileData.profileUsername?.length >= 1) {
-        const verificationCode = generateVerificationCode();
+      const verificationCode = generateVerificationCode();
 
-        // Envía el código de verificación por correo electrónico
-        await sendVerificationCodeByEmail(email, verificationCode);
+      // Envía el código de verificación por correo electrónico
+      await sendVerificationCodeByEmail(email, verificationCode);
 
-        // Guarda el código de verificación en Firestore (o en tu base de datos)
-        await saveVerificationCodeInFirestore(email, verificationCode);
-        // 'profileUsername' exists
-        res.status(200).json({ emailExists: true, usernameExists: true });
-      } else {
-        // 'profileUsername' doesn't exist
-        const verificationCode = generateVerificationCode();
-
-        // Envía el código de verificación por correo electrónico
-        await sendVerificationCodeByEmail(email, verificationCode);
-
-        // Guarda el código de verificación en Firestore (o en tu base de datos)
-        await saveVerificationCodeInFirestore(email, verificationCode);
-        res.status(200).json({ emailExists: true, usernameExists: false });
-      }
+      // Guarda el código de verificación en Firestore (o en tu base de datos)
+      await saveVerificationCodeInFirestore(email, verificationCode);
+      // 'profileUsername' exists
+      res.status(200).json({ emailExists: true });
     } else {
       // El correo no existe en la plataforma
       res.status(404).json({
@@ -680,41 +569,6 @@ const validateAdminCode = async (req, res) => {
       .json({ successCode: false, message: 'Internal server error' });
   }
 };
-const validateUserName = async (req, res) => {
-  const { username } = req.body; // Obtén el nombre de usuario desde la solicitud
-
-  if (typeof username === 'undefined') {
-    // Si el nombre de usuario es "undefined" en la solicitud, responde con un error
-    return res.status(400).json({
-      availableUser: false,
-      error: 'Username is missing in the request',
-    });
-  }
-
-  try {
-    // Consulta la colección de perfiles en Firestore para verificar si el nombre de usuario ya existe
-    const profilesRef = db.collection('profiles');
-    const profileQuery = profilesRef.where('profileUsername', '==', username);
-    const profileSnapshot = await profileQuery.get();
-
-    if (!profileSnapshot.empty) {
-      // El nombre de usuario ya está en uso en la colección de perfiles
-      return res
-        .status(400)
-        .json({ availableUser: false, error: 'Username already in use' });
-    } else {
-      // El nombre de usuario está disponible en la colección de perfiles
-      return res
-        .status(200)
-        .json({ availableUser: true, message: 'Username available' });
-    }
-  } catch (error) {
-    console.error('Error while validating username:', error);
-    return res
-      .status(500)
-      .json({ availableUser: false, error: 'Internal server error' });
-  }
-};
 
 const reSendVerificationCode = async (req, res) => {
   const { email } = req.body;
@@ -744,7 +598,6 @@ module.exports = {
   validateEmail,
   validateCode,
   validateAdminCode,
-  validateUserName,
   submitForm,
   reSendVerificationCode,
 };
