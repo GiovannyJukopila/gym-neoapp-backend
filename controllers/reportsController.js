@@ -485,6 +485,7 @@ const generateExpirationReport = async (req, res) => {
       .firestore()
       .collection('profiles')
       .where('gymId', '==', gymId)
+      .where('role', 'array-contains', 'member')
       .where('profileStatus', '==', 'true')
       .get();
 
