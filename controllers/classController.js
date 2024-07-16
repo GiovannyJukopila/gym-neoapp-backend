@@ -15,7 +15,6 @@ const createClass = async (req, res) => {
 
     const eventDate = new Date(body.eventDate);
 
-    // Verificar si expirationDate es diferente de null
     if (body.expirationDate !== null) {
       const expirationDate = new Date(body.expirationDate);
       const gymClassSerialNumber = await generateSequentialNumber(gymId);
@@ -767,14 +766,39 @@ const getWeekClasses = async (req, res) => {
       return res.status(400).json({ error: 'Invalid date format' });
     }
 
-    // Calcular el inicio del rango desde la fecha proporcionada
-    let startOfRange = new Date(initialDate);
-    startOfRange.setHours(0, 0, 0, 0); // Establecer la hora a las 00:00 AM del día inicial
+    // Obtener la fecha y hora actual
+    const now = new Date();
 
-    // Calcular la fecha de finalización del domingo (23:59:59.999 PM)
-    const endOfRange = new Date(startOfRange);
-    endOfRange.setDate(startOfRange.getDate() + (7 - startOfRange.getDay())); // Añadir días para llegar al domingo
-    endOfRange.setHours(23, 59, 59, 999); // Establecer la hora a las 23:59:59.999 PM
+    // Calcular el inicio de la semana actual (lunes)
+    const startOfCurrentWeek = new Date(now);
+    startOfCurrentWeek.setDate(now.getDate() - now.getDay() + 1);
+    startOfCurrentWeek.setHours(0, 0, 0, 0);
+
+    // Calcular el final de la semana actual (domingo)
+    const endOfCurrentWeek = new Date(startOfCurrentWeek);
+    endOfCurrentWeek.setDate(startOfCurrentWeek.getDate() + 6);
+    endOfCurrentWeek.setHours(23, 59, 59, 999);
+
+    // Determinar si la fecha proporcionada está en la semana actual
+    let startOfRange;
+    let endOfRange;
+
+    if (initialDate >= startOfCurrentWeek && initialDate <= endOfCurrentWeek) {
+      // Si está en la semana actual, usar la fecha y hora actual como inicio del rango
+      startOfRange = new Date(now);
+      startOfRange.setMilliseconds(0);
+      // Usar el final de la semana actual
+      endOfRange = endOfCurrentWeek;
+    } else {
+      // Si está en otra semana, usar el lunes de esa semana como inicio del rango
+      startOfRange = new Date(initialDate);
+      startOfRange.setDate(initialDate.getDate() - initialDate.getDay() + 1);
+      startOfRange.setHours(0, 0, 0, 0);
+      // Usar el domingo de esa semana como final del rango
+      endOfRange = new Date(startOfRange);
+      endOfRange.setDate(startOfRange.getDate() + 6);
+      endOfRange.setHours(23, 59, 59, 999);
+    }
 
     // Función para formatear fechas a YYYY-MM-DDTHH:mm:ss.sssZ
     const formatDateTime = (date) => {
