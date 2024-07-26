@@ -626,6 +626,7 @@ const sendUnknownMemberAttendance = async (req, res) => {
       profileId: profileId,
       cardSerialNumber: cardSerialNumber,
       attendanceDate: new Date(),
+      role: 'non-member',
       currentCredit: currentCredit - 1,
     });
 

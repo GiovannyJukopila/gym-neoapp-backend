@@ -3,6 +3,7 @@ const app = express();
 const { db } = require('../firebase');
 const bodyParser = require('body-parser');
 const admin = require('firebase-admin');
+const QRCode = require('qrcode');
 const moment = require('moment');
 
 const addClassUnknownParticipants = async (req, res) => {
@@ -125,6 +126,10 @@ const addClassParticipants = async (req, res) => {
     }
     const profileDoc = profileSnapshot.docs[0].data();
 
+    // Generar el código QR para el participante
+    const qrData = `${profileDoc.profileId},${classId}`;
+    const qrCode = await generateQRCode(qrData);
+
     const participant = {
       profileId: profileDoc.profileId,
       profileEmail: profileDoc.profileEmail,
@@ -132,18 +137,20 @@ const addClassParticipants = async (req, res) => {
       profileName: profileDoc.profileName,
       profilePicture: profileDoc.profilePicture,
       cardSerialNumber: profileDoc.cardSerialNumber,
+      attendance: false,
+      qrCode: qrCode, // Añadir el código QR al participante
     };
 
-    // Obtén la referencia a la colección de clases
+    // Obtener la referencia a la colección de clases
     const classesCollection = db.collection('classes');
 
-    // Obtén la referencia al documento de la clase por ID
+    // Obtener la referencia al documento de la clase por ID
     const classDocRef = classesCollection.doc(classId);
 
-    // Verifica si la clase existe
+    // Verificar si la clase existe
     const classDoc = await classDocRef.get();
 
-    // Si la clase no existe, crea un nuevo documento con el campo participants inicializado en 1
+    // Si la clase no existe, crear un nuevo documento con el campo participants inicializado en 1
     if (!classDoc.exists) {
       await classDocRef.set({
         participants: [participant],
@@ -156,7 +163,7 @@ const addClassParticipants = async (req, res) => {
       });
     }
 
-    // Obtiene el campo de participantes actual
+    // Obtener el campo de participantes actual
     const currentParticipants = classDoc.data().participants || [];
 
     const alreadyAdded = currentParticipants.some(
@@ -169,9 +176,9 @@ const addClassParticipants = async (req, res) => {
         .json({ message: 'You are already a participant in this class' });
     }
 
-    // Actualiza el campo de participantes utilizando arrayUnion
+    // Actualizar el campo de participantes utilizando arrayUnion
     await classDocRef.update({
-      participants: admin.firestore.FieldValue.arrayUnion(participant),
+      participants: [...currentParticipants, participant], // Añadir el nuevo participante al array existente
       currentClassParticipants: currentParticipants.length + 1,
     });
 
@@ -186,6 +193,94 @@ const addClassParticipants = async (req, res) => {
       .json({ message: 'Error interno del servidor al agregar participantes' });
   }
 };
+
+const generateQRCode = async (qrData) => {
+  try {
+    const qrDataString = JSON.stringify(qrData);
+    const qrCode = await QRCode.toDataURL(qrDataString);
+    return qrCode;
+  } catch (error) {
+    console.error('Error al generar código QR:', error);
+    throw error;
+  }
+};
+
+// const addClassParticipants = async (req, res) => {
+//   try {
+//     const classId = req.body.classId;
+//     const profileId = req.body.profileId;
+
+//     const profileSnapshot = await db
+//       .collection('profiles')
+//       .where('profileId', '==', profileId)
+//       .get();
+
+//     if (profileSnapshot.empty) {
+//       return res.status(404).json({ message: 'Profile not found' });
+//     }
+//     const profileDoc = profileSnapshot.docs[0].data();
+
+//     const participant = {
+//       profileId: profileDoc.profileId,
+//       profileEmail: profileDoc.profileEmail,
+//       profileTelephoneNumber: profileDoc.profileTelephoneNumber,
+//       profileName: profileDoc.profileName,
+//       profilePicture: profileDoc.profilePicture,
+//       cardSerialNumber: profileDoc.cardSerialNumber,
+//     };
+
+//     // Obtén la referencia a la colección de clases
+//     const classesCollection = db.collection('classes');
+
+//     // Obtén la referencia al documento de la clase por ID
+//     const classDocRef = classesCollection.doc(classId);
+
+//     // Verifica si la clase existe
+//     const classDoc = await classDocRef.get();
+
+//     // Si la clase no existe, crea un nuevo documento con el campo participants inicializado en 1
+//     if (!classDoc.exists) {
+//       await classDocRef.set({
+//         participants: [participant],
+//         currentClassParticipants: 1,
+//       });
+
+//       return res.status(200).json({
+//         message: 'Participantes agregados con éxito',
+//         currentClassParticipants: 1,
+//       });
+//     }
+
+//     // Obtiene el campo de participantes actual
+//     const currentParticipants = classDoc.data().participants || [];
+
+//     const alreadyAdded = currentParticipants.some(
+//       (p) => p.profileId === profileDoc.profileId
+//     );
+
+//     if (alreadyAdded) {
+//       return res
+//         .status(400)
+//         .json({ message: 'You are already a participant in this class' });
+//     }
+
+//     // Actualiza el campo de participantes utilizando arrayUnion
+//     await classDocRef.update({
+//       participants: admin.firestore.FieldValue.arrayUnion(participant),
+//       currentClassParticipants: currentParticipants.length + 1,
+//     });
+
+//     return res.status(200).json({
+//       message: 'Successfully added to the class.',
+//       currentClassParticipants: currentParticipants.length + 1,
+//     });
+//   } catch (error) {
+//     console.error('Error al agregar participantes:', error);
+//     return res
+//       .status(500)
+//       .json({ message: 'Error interno del servidor al agregar participantes' });
+//   }
+// };
 
 const getUnknownMemberClassesByProfileId = async (req, res) => {
   try {
@@ -290,6 +385,7 @@ const getUnknownMemberCourtsByProfileId = async (req, res) => {
     const courts = [];
     snapshot.forEach((doc) => {
       const courtData = doc.data();
+      // console.log(courtData);
       // Verificar si el profileId está en el array de unknownParticipants, si existe
       if (
         courtData.unknownParticipants &&

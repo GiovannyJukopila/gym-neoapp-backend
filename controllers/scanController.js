@@ -264,6 +264,153 @@ const getMembershipSnapshot = async (membershipId) => {
   return await membershipsRef.where('membershipId', '==', membershipId).get();
 };
 
+const markClassMemberAttendance = async (req, res) => {
+  const profileId = req.params.profileId;
+  const classId = req.params.classId;
+
+  try {
+    // Referencia al documento de la clase
+    const classRef = db.collection('classes').doc(classId);
+
+    // Obtener el documento de la clase
+    const classDoc = await classRef.get();
+
+    if (!classDoc.exists) {
+      return res.status(404).json({ message: 'Class not found.' });
+    }
+
+    // Obtener los datos de la clase
+    const classData = classDoc.data();
+    const className = classData.className;
+    const startTime = classData.startTime;
+    const endTime = classData.endTime;
+    const eventDate = new Date(classData.eventDate);
+
+    // Obtener la hora actual
+    const now = new Date();
+
+    // Calcular los tiempos de inicio y fin con las horas correspondientes
+    const [startHour, startMinute] = startTime.split(':').map(Number);
+    const [endHour, endMinute] = endTime.split(':').map(Number);
+
+    const classStart = new Date(eventDate);
+    classStart.setHours(startHour, startMinute, 0, 0);
+
+    const classEnd = new Date(eventDate);
+    classEnd.setHours(endHour, endMinute, 0, 0);
+
+    const oneHourBeforeStart = new Date(classStart);
+    oneHourBeforeStart.setHours(oneHourBeforeStart.getHours() - 1);
+
+    // Validar si el cliente intenta marcar asistencia en el tiempo permitido
+    if (now < oneHourBeforeStart) {
+      return res.status(400).json({
+        message:
+          'You can only mark attendance within 1 hour before the class starts until it ends.',
+      });
+    }
+
+    if (now > classEnd) {
+      return res.status(400).json({
+        message: 'You cannot mark attendance after the class has ended.',
+      });
+    }
+
+    // Validar si el cliente intenta marcar asistencia en el día correcto
+    const classDay = classStart.toISOString().split('T')[0];
+    const currentDay = now.toISOString().split('T')[0];
+
+    if (classDay !== currentDay) {
+      return res.status(400).json({
+        message: 'You can only mark attendance on the correct class day.',
+      });
+    }
+
+    // Filtrar el array participants para encontrar el profileId
+    const participant = classData.participants.find(
+      (participant) => participant.profileId === profileId
+    );
+
+    if (!participant) {
+      return res
+        .status(404)
+        .json({ message: 'Participant not found in class.' });
+    }
+
+    // Verificar si la asistencia ya fue marcada
+    if (participant.attendance === true) {
+      return res
+        .status(400)
+        .json({ message: 'Attendance already marked for this class.' });
+    }
+
+    // Referencia al documento del perfil
+    const profileRef = db.collection('profiles').doc(profileId);
+
+    // Obtener el perfil
+    const profileDoc = await profileRef.get();
+
+    if (!profileDoc.exists) {
+      return res.status(404).json({ message: 'Profile not found.' });
+    }
+
+    // Obtener el cardSerialNumber y otros datos del perfil
+    const profileData = profileDoc.data();
+    const cardSerialNumber = profileData.cardSerialNumber;
+    const profileName = profileData.profileName;
+    const profileLastname = profileData.profileLastname;
+    const gymId = profileData.gymId;
+    const profilePicture = profileData.profilePicture;
+
+    if (!cardSerialNumber) {
+      return res
+        .status(400)
+        .json({ message: 'cardSerialNumber not found in profile.' });
+    }
+
+    // Referencia a la colección attendanceHistory
+    const attendanceHistoryRef = db.collection('attendanceHistory');
+
+    // Agregar un nuevo documento a la colección attendanceHistory
+    await attendanceHistoryRef.add({
+      gymId: gymId,
+      activityId: classId,
+      profileId: profileId,
+      cardSerialNumber: cardSerialNumber,
+      attendanceDate: new Date(),
+      role: 'member',
+    });
+
+    // Actualizar el array participants para marcar la asistencia
+    const updatedParticipants = classData.participants.map((participant) => {
+      if (participant.profileId === profileId) {
+        return { ...participant, attendance: true };
+      }
+      return participant;
+    });
+
+    // Actualizar el documento de la clase con el array participants modificado
+    await classRef.update({ participants: updatedParticipants });
+
+    // Responder con los datos necesarios
+    res.status(200).json({
+      message: 'Attendance marked successfully.',
+      profileName: profileName,
+      profileLastname: profileLastname,
+      className: className,
+      startTime: startTime,
+      endTime: endTime,
+      profilePicture: profilePicture,
+      profileId: profileId,
+      attendance: true,
+    });
+  } catch (error) {
+    console.error('Error handling member attendance:', error);
+    res.status(500).json({ message: 'Internal server error.' });
+  }
+};
+
 module.exports = {
   scanMember,
+  markClassMemberAttendance,
 };

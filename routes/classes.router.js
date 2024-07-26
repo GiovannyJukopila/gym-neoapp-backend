@@ -6,6 +6,7 @@ const {
   getTodaysClasses,
   getTrainers,
   getWeekClasses,
+  changeMemberAttendanceStatus,
   addParticipants,
   addUnknownParticipants,
   createClass,
@@ -34,6 +35,11 @@ router.get('/todaysClasses/:gymId', verifyToken, getTodaysClasses);
 router.get('/getWeekClasses/:gymId', verifyToken, getWeekClasses);
 
 // router.get('/get/:id', getClass);
+router.post(
+  '/changeMemberAttendanceStatus',
+  verifyToken,
+  changeMemberAttendanceStatus
+);
 
 router.post('/addParticipants', verifyToken, addParticipants);
 

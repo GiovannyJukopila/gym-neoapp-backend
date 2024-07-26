@@ -4,8 +4,10 @@ const { db } = require('../firebase');
 const bodyParser = require('body-parser');
 const admin = require('firebase-admin');
 const moment = require('moment');
-// const PDFDocument = require('pdfkit-table');
-// const { format, parseISO } = require('date-fns');
+const QRCode = require('qrcode');
+const PDFDocument = require('pdfkit-table');
+const { format, parseISO } = require('date-fns');
+
 app.use(bodyParser.json());
 
 const createClass = async (req, res) => {
@@ -276,6 +278,7 @@ const getAllClasses = async (req, res) => {
         unknownParticipants: data?.unknownParticipants,
         currentUnkwnownClassParticipants:
           data?.currentUnkwnownClassParticipants,
+        attendance: data?.attendance,
       };
       classesArray.push(membership);
     });
@@ -470,49 +473,117 @@ const getTrainers = async (req, res) => {
 
 const addParticipants = async (req, res) => {
   try {
-    const participants = req.body.memberForm; // Extraer la lista de participantes de req.body.memberForm
+    const participants = req.body.memberForm; // Extraer el participante de req.body.memberForm
     const classId = req.body.classId;
 
-    // Obtén la referencia a la colección de clases
+    const memberForm = participants[participants.length - 1];
+    const qrData = `${memberForm.profileId},${classId}`;
+
+    const qrCode = await generateQRCode(qrData);
+    const participant = {
+      ...memberForm,
+      attendance: false,
+      qrCode: qrCode,
+    };
+
+    // Obtener la referencia a la colección de clases
     const classesCollection = db.collection('classes');
 
-    // Obtén la referencia al documento de la clase por ID
+    // Obtener la referencia al documento de la clase por ID
     const classDocRef = classesCollection.doc(classId);
 
-    // Verifica si la clase existe
+    // Verificar si la clase existe
     const classDoc = await classDocRef.get();
 
-    // Si la clase no existe, crea un nuevo documento con el campo participants inicializado en 1
+    // Si la clase no existe, crear un nuevo documento con el campo participants inicializado en 1
     if (!classDoc.exists) {
       await classDocRef.set({
-        participants: participants,
+        participants: [participant],
         currentClassParticipants: 1,
       });
 
       return res.status(200).json({
-        message: 'Participantes agregados con éxito',
+        message: 'Participante agregado con éxito',
         currentClassParticipants: 1,
       });
     }
 
-    // Obtiene el campo de participantes actual
+    // Obtener el campo de participantes actual
     const currentParticipants = classDoc.data().participants || [];
 
-    // Actualiza el campo de participantes utilizando arrayUnion
+    // Actualizar el campo de participantes utilizando arrayUnion
     await classDocRef.update({
-      participants: admin.firestore.FieldValue.arrayUnion(...participants),
+      participants: admin.firestore.FieldValue.arrayUnion(participant),
       currentClassParticipants: currentParticipants.length + 1,
     });
 
     return res.status(200).json({
-      message: 'Participantes agregados con éxito',
+      message: 'Participante agregado con éxito',
       currentClassParticipants: currentParticipants.length + 1,
     });
   } catch (error) {
-    console.error('Error al agregar participantes:', error);
+    console.error('Error al agregar participante y generar QR:', error);
     return res.status(500).json({ message: 'Error interno del servidor' });
   }
 };
+
+// Función para generar el código QR y retornarlo como base64
+const generateQRCode = async (qrData) => {
+  try {
+    const qrDataString = JSON.stringify(qrData);
+    const qrCode = await QRCode.toDataURL(qrDataString);
+    return qrCode;
+  } catch (error) {
+    console.error('Error al generar código QR:', error);
+    throw error;
+  }
+};
+
+// const addParticipants = async (req, res) => {
+//   try {
+//     const participants = req.body.memberForm; // Extraer la lista de participantes de req.body.memberForm
+//     const classId = req.body.classId;
+
+//     // Obtén la referencia a la colección de clases
+//     const classesCollection = db.collection('classes');
+
+//     // Obtén la referencia al documento de la clase por ID
+//     const classDocRef = classesCollection.doc(classId);
+
+//     // Verifica si la clase existe
+//     const classDoc = await classDocRef.get();
+
+//     // Si la clase no existe, crea un nuevo documento con el campo participants inicializado en 1
+//     if (!classDoc.exists) {
+//       await classDocRef.set({
+//         participants: participants,
+//         currentClassParticipants: 1,
+//       });
+
+//       return res.status(200).json({
+//         message: 'Participantes agregados con éxito',
+//         currentClassParticipants: 1,
+//       });
+//     }
+
+//     // Obtiene el campo de participantes actual
+//     const currentParticipants = classDoc.data().participants || [];
+
+//     // Actualiza el campo de participantes utilizando arrayUnion
+//     await classDocRef.update({
+//       participants: admin.firestore.FieldValue.arrayUnion(...participants),
+//       currentClassParticipants: currentParticipants.length + 1,
+//     });
+
+//     return res.status(200).json({
+//       message: 'Participantes agregados con éxito',
+//       currentClassParticipants: currentParticipants.length + 1,
+//     });
+//   } catch (error) {
+//     console.error('Error al agregar participantes:', error);
+//     return res.status(500).json({ message: 'Error interno del servidor' });
+//   }
+// };
 
 const addUnknownParticipants = async (req, res) => {
   try {
@@ -902,181 +973,249 @@ const formatEventDateTime = (eventDate, startDate, endDate) => {
     return '';
   }
 };
-const generateClassReport = async () => {};
 
-// const generateClassReport = async (req, res) => {
-//   const { gymId } = req.params;
-//   const { classId } = req.body;
+const generateClassReport = async (req, res) => {
+  const { gymId } = req.params;
+  const { classId } = req.body;
 
-//   try {
-//     // Busca el documento de la clase por classId en la colección de classes
-//     const classDoc = await db.collection('classes').doc(classId).get();
+  try {
+    // Busca el documento de la clase por classId en la colección de classes
+    const classDoc = await db.collection('classes').doc(classId).get();
 
-//     if (!classDoc.exists) {
-//       return res.status(404).json({ message: 'Class not found' });
-//     }
+    if (!classDoc.exists) {
+      return res.status(404).json({ message: 'Class not found' });
+    }
 
-//     const classData = classDoc.data();
+    const classData = classDoc.data();
+    const formattedEventDateTime = formatEventDateTime(
+      classData.eventDate,
+      classData.startTime,
+      classData.endTime
+    );
+    const participants = classData.participants || [];
+    const unknownParticipants = classData.unknownParticipants || [];
 
-//     const formattedEventDateTime = formatEventDateTime(
-//       classData.eventDate,
-//       classData.startTime,
-//       classData.endTime
-//     );
-//     const participants = classData.participants || [];
-//     const unknownParticipants = classData.unknownParticipants || [];
+    // Obtén los datos de los perfiles de los participantes
+    const participantsPromises = participants.map((participant) =>
+      db.collection('profiles').doc(participant.profileId).get()
+    );
+    const participantDocs = await Promise.all(participantsPromises);
+    const participantProfiles = participantDocs.map((doc) => doc.data());
 
-//     // Obtén los datos de los perfiles de los participantes
-//     const participantsPromises = participants.map((participant) =>
-//       db.collection('profiles').doc(participant.profileId).get()
-//     );
-//     const participantDocs = await Promise.all(participantsPromises);
-//     const participantProfiles = participantDocs.map((doc) => doc.data());
+    // Obtén los datos de los perfiles de los non members
+    const unknownParticipantsPromises = unknownParticipants.map((participant) =>
+      db.collection('profiles').doc(participant.profileId).get()
+    );
+    const unknownParticipantDocs = await Promise.all(
+      unknownParticipantsPromises
+    );
+    const unknownParticipantProfiles = unknownParticipantDocs.map((doc) =>
+      doc.data()
+    );
 
-//     // Obtén los datos de los perfiles de los non members
-//     const unknownParticipantsPromises = unknownParticipants.map((participant) =>
-//       db.collection('profiles').doc(participant.profileId).get()
-//     );
-//     const unknownParticipantDocs = await Promise.all(
-//       unknownParticipantsPromises
-//     );
-//     const unknownParticipantProfiles = unknownParticipantDocs.map((doc) =>
-//       doc.data()
-//     );
+    // Obtén los profileIds de los no miembros que asistieron desde attendanceHistory
+    const nonMemberAttendanceQuerySnapshot = await db
+      .collection('attendanceHistory')
+      .where('activityId', '==', classId)
+      .where('role', '==', 'non-member')
+      .get();
 
-//     // Obtén los profileIds de los no miembros que asistieron desde attendanceHistory
-//     const attendanceQuerySnapshot = await db
-//       .collection('attendanceHistory')
-//       .where('activityId', '==', classId)
-//       .get();
+    const nonMemberAttendanceData = nonMemberAttendanceQuerySnapshot.docs.map(
+      (doc) => ({
+        profileId: doc.data().profileId,
+        attendanceDate: doc.data().attendanceDate,
+        currentCredit: doc.data().currentCredit,
+        cardSerialNumber: doc.data().cardSerialNumber,
+      })
+    );
 
-//     const nonMemberAttendanceData = attendanceQuerySnapshot.docs.map((doc) => ({
-//       profileId: doc.data().profileId,
-//       attendanceDate: doc.data().attendanceDate,
-//       currentCredit: doc.data().currentCredit,
-//       cardSerialNumber: doc.data().cardSerialNumber,
-//     }));
+    const nonMemberAttendanceProfileIds =
+      nonMemberAttendanceQuerySnapshot.docs.map((doc) => doc.data().profileId);
 
-//     const nonMemberAttendanceProfileIds = attendanceQuerySnapshot.docs.map(
-//       (doc) => doc.data().profileId
-//     );
+    // Filtra los participantes no miembros para obtener solo los que asistieron
+    const nonMemberParticipants = unknownParticipants.filter((participant) =>
+      nonMemberAttendanceProfileIds.includes(participant.profileId)
+    );
 
-//     // Filtra los participantes no miembros para obtener solo los que asistieron
-//     const nonMemberParticipants = unknownParticipants.filter((participant) =>
-//       nonMemberAttendanceProfileIds.includes(participant.profileId)
-//     );
+    // Obtén los datos de los perfiles de los no miembros que asistieron
+    const nonMemberProfilesPromises = nonMemberParticipants.map((participant) =>
+      db.collection('profiles').doc(participant.profileId).get()
+    );
+    const nonMemberProfilesDocs = await Promise.all(nonMemberProfilesPromises);
+    const nonMemberProfilesData = nonMemberProfilesDocs
+      .map((doc) => (doc.exists ? doc.data() : null))
+      .filter((profile) => profile !== null);
 
-//     // Obtén los datos de los perfiles de los no miembros que asistieron
-//     const nonMemberProfilesPromises = nonMemberParticipants.map((participant) =>
-//       db.collection('profiles').doc(participant.profileId).get()
-//     );
-//     const nonMemberProfilesDocs = await Promise.all(nonMemberProfilesPromises);
-//     const nonMemberProfilesData = nonMemberProfilesDocs
-//       .map(
-//         (doc) => (doc.exists ? doc.data() : null) // Manejo de documentos vacíos
-//       )
-//       .filter((profile) => profile !== null); // Filtrar perfiles nulos
+    // Obtén los profileIds de los miembros que asistieron desde attendanceHistory
+    const memberAttendanceQuerySnapshot = await db
+      .collection('attendanceHistory')
+      .where('activityId', '==', classId)
+      .where('role', '==', 'member')
+      .get();
 
-//     // Crear un nuevo documento PDF
-//     const doc = new PDFDocument();
-//     res.setHeader('Content-Type', 'application/pdf');
-//     res.setHeader('Content-Disposition', 'inline; filename="class_report.pdf"');
-//     doc.pipe(res);
+    const memberAttendanceData = memberAttendanceQuerySnapshot.docs.map(
+      (doc) => ({
+        profileId: doc.data().profileId,
+        attendanceDate: doc.data().attendanceDate,
+        cardSerialNumber: doc.data().cardSerialNumber,
+      })
+    );
 
-//     // Encabezado del documento
-//     doc.rect(0, 0, 612, 80).fill('#FFA500');
-//     // Encabezado del documento
-//     doc.rect(0, 0, 612, 80).fill('#FFA500');
-//     doc
-//       .fontSize(25)
-//       .fill('white')
-//       .text(`CLASS REPORT - ${classData.className}`, 50, 30, {
-//         align: 'left',
-//         valign: 'center',
-//       });
+    const memberAttendanceProfileIds = memberAttendanceQuerySnapshot.docs.map(
+      (doc) => doc.data().profileId
+    );
 
-//     // Información de la clase
-//     doc.fontSize(18).text(`${formattedEventDateTime}`, {
-//       bold: true,
-//     });
+    // Filtra los participantes miembros para obtener solo los que asistieron
+    const memberParticipants = participants.filter((participant) =>
+      memberAttendanceProfileIds.includes(participant.profileId)
+    );
 
-//     doc.moveDown(); // Mover más abajo
-//     doc.fillColor('black');
-//     doc.fontSize(12); // Cambiar color a negro
-//     doc.text(`• Total Members Participants: ${participants.length}`);
-//     doc.text(`• Total Non-Members Participants: ${unknownParticipants.length}`);
-//     doc.moveDown();
+    // Obtén los datos de los perfiles de los miembros que asistieron
+    const memberProfilesPromises = memberParticipants.map((participant) =>
+      db.collection('profiles').doc(participant.profileId).get()
+    );
+    const memberProfilesDocs = await Promise.all(memberProfilesPromises);
+    const memberProfilesData = memberProfilesDocs
+      .map((doc) => (doc.exists ? doc.data() : null))
+      .filter((profile) => profile !== null);
 
-//     // Tabla de miembros participantes
-//     if (participantProfiles.length > 0) {
-//       const membersTableData = participantProfiles.map((profile) => [
-//         `${profile.profileName || 'N/A'} ${profile.profileLastname || 'N/A'}`,
-//         profile.profileEmail || 'N/A',
-//         profile.cardSerialNumber || 'N/A',
-//         profile.profileTelephoneNumber || 'N/A',
-//       ]);
+    // Crear un nuevo documento PDF
+    const doc = new PDFDocument();
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'inline; filename="class_report.pdf"');
+    doc.pipe(res);
 
-//       const membersTableHeaders = [
-//         'Name',
-//         'Email',
-//         'Card Serial Number',
-//         'Telephone',
-//       ];
+    // Encabezado del documento
+    doc.rect(0, 0, 612, 80).fill('#FFA500');
+    doc
+      .fontSize(25)
+      .fill('white')
+      .text(`CLASS REPORT - ${classData.className}`, 50, 30, {
+        align: 'left',
+        valign: 'center',
+      });
 
-//       await generateTable(
-//         'Members Participants',
-//         membersTableHeaders,
-//         membersTableData,
-//         doc
-//       );
-//       doc.moveDown();
-//     }
+    // Información de la clase
+    doc.fontSize(18).text(`${formattedEventDateTime}`, { bold: true });
 
-//     // Tabla de no miembros participantes
-//     if (unknownParticipantProfiles.length > 0) {
-//       const unknownTableData = unknownParticipantProfiles.map((profile) => [
-//         `${profile.profileName || 'N/A'}`,
-//         profile.unknownMemberEmail || 'N/A',
-//         profile.cardSerialNumber || 'N/A',
-//         profile.unknownMemberPhoneNumber || 'N/A',
-//       ]);
+    doc.moveDown(); // Mover más abajo
+    doc.fillColor('black');
+    doc.fontSize(12); // Cambiar color a negro
+    doc.text(`• Total Members Participants: ${participants.length}`);
+    doc.text(`• Total Non-Members Participants: ${unknownParticipants.length}`);
+    doc.moveDown();
 
-//       const unknownTableHeaders = [
-//         'Name',
-//         'Email',
-//         'Card Serial Number',
-//         'Telephone',
-//       ];
+    // Tabla de miembros participantes
+    if (participantProfiles.length > 0) {
+      const membersTableData = participantProfiles.map((profile) => [
+        `${profile.profileName || 'N/A'} ${profile.profileLastname || 'N/A'}`,
+        profile.profileEmail || 'N/A',
+        profile.cardSerialNumber || 'N/A',
+        profile.profileTelephoneNumber || 'N/A',
+      ]);
 
-//       await generateTable(
-//         'Non-Members Participants',
-//         unknownTableHeaders,
-//         unknownTableData,
-//         doc
-//       );
-//       doc.moveDown();
-//     }
+      const membersTableHeaders = [
+        'Name',
+        'Email',
+        'Card Serial Number',
+        'Telephone',
+      ];
 
-//     // Tabla de asistencia de no miembros
-//     if (nonMemberProfilesData.length > 0) {
-//       await generateNonMembersAttendanceTable(
-//         nonMemberProfilesData,
-//         nonMemberAttendanceData,
-//         doc
-//       );
-//       doc.moveDown();
-//     }
+      await generateTable(
+        'Members Participants',
+        membersTableHeaders,
+        membersTableData,
+        doc
+      );
+      doc.moveDown();
+    }
 
-//     // Finalizar el documento
-//     doc.end();
-//   } catch (error) {
-//     console.error('Error generating class report:', error);
-//     res.status(500).json({ message: 'Internal server error' });
-//   }
-// };
+    // Tabla de no miembros participantes
+    if (unknownParticipantProfiles.length > 0) {
+      const unknownTableData = unknownParticipantProfiles.map((profile) => [
+        `${profile.profileName || 'N/A'}`,
+        profile.unknownMemberEmail || 'N/A',
+        profile.cardSerialNumber || 'N/A',
+        profile.unknownMemberPhoneNumber || 'N/A',
+      ]);
 
-// Función para generar la tabla de Non-Members Attendance
-// En la función generateNonMembersAttendanceTable
+      const unknownTableHeaders = [
+        'Name',
+        'Email',
+        'Card Serial Number',
+        'Telephone',
+      ];
+
+      await generateTable(
+        'Non-Members Participants',
+        unknownTableHeaders,
+        unknownTableData,
+        doc
+      );
+      doc.moveDown();
+    }
+
+    // Tabla de asistencia de no miembros
+    if (nonMemberProfilesData.length > 0) {
+      await generateNonMembersAttendanceTable(
+        nonMemberProfilesData,
+        nonMemberAttendanceData,
+        doc
+      );
+      doc.moveDown();
+    }
+
+    // Tabla de asistencia de miembros
+    if (memberProfilesData.length > 0) {
+      await generateMembersAttendanceTable(
+        memberProfilesData,
+        memberAttendanceData,
+        doc
+      );
+      doc.moveDown();
+    }
+
+    // Finalizar el documento
+    doc.end();
+  } catch (error) {
+    console.error('Error generating class report:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+const generateMembersAttendanceTable = async (
+  memberProfilesData,
+  memberAttendanceData,
+  doc
+) => {
+  const membersAttendanceTableData = memberProfilesData.map(
+    (profile, index) => [
+      `${profile.profileName || 'N/A'} ${profile.profileLastname || 'N/A'}`,
+      profile.profileEmail || 'N/A',
+      'Attended', // Estado de asistencia ajustado según necesidades
+      memberAttendanceData[index].attendanceDate
+        ? formatTimestamp(memberAttendanceData[index].attendanceDate)
+        : 'N/A', // Formatear la fecha de asistencia
+      `${memberAttendanceData[index].cardSerialNumber || 'N/A'}`, // Número de tarjeta
+    ]
+  );
+
+  const membersAttendanceTableHeaders = [
+    'Name',
+    'Email',
+    'Attendance Status',
+    'Attendance Date',
+    'Card Serial Number',
+  ];
+
+  await generateTable(
+    'Members Attendance',
+    membersAttendanceTableHeaders,
+    membersAttendanceTableData,
+    doc
+  );
+};
+
 const generateNonMembersAttendanceTable = async (
   nonMemberProfilesData,
   nonMemberAttendanceData,
@@ -1261,6 +1400,111 @@ const getAllprimaryClasses = async (req, res) => {
   }
 };
 
+const changeMemberAttendanceStatus = async (req, res) => {
+  const { profileId, classId } = req.body;
+
+  try {
+    // Referencias a las colecciones
+    const profilesRef = db.collection('profiles').doc(profileId);
+    const classRef = db.collection('classes').doc(classId);
+    const attendanceHistoryRef = db.collection('attendanceHistory');
+
+    // Obtener el perfil
+    const profileDoc = await profilesRef.get();
+    if (!profileDoc.exists) {
+      return res.status(404).json({ message: 'Profile not found.' });
+    }
+
+    const profileData = profileDoc.data();
+    const cardSerialNumber = profileData.cardSerialNumber;
+    const gymId = profileData.gymId;
+    const profileName = profileData.profileName;
+    const profileLastname = profileData.profileLastname;
+
+    // Obtener la clase
+    const classDoc = await classRef.get();
+    if (!classDoc.exists) {
+      return res.status(404).json({ message: 'Class not found.' });
+    }
+
+    const classData = classDoc.data();
+    const participants = classData.participants;
+
+    // Encontrar el participante
+    const participantIndex = participants.findIndex(
+      (p) => p.profileId === profileId
+    );
+    if (participantIndex === -1) {
+      return res
+        .status(404)
+        .json({ message: 'Participant not found in the class.' });
+    }
+
+    const participant = participants[participantIndex];
+    const attendanceStatus = participant.attendance;
+
+    if (attendanceStatus === false) {
+      // Crear el registro en attendanceHistory
+      await attendanceHistoryRef.add({
+        gymId: gymId,
+        activityId: classId,
+        profileId: profileId,
+        cardSerialNumber: cardSerialNumber,
+        attendanceDate: new Date(),
+        role: 'member',
+      });
+
+      // Actualizar el estado de asistencia a true
+      participants[participantIndex].attendance = true;
+      await classRef.update({ participants });
+
+      // Responder con los datos actualizados
+      res.status(200).json({
+        message: 'Attendance marked successfully.',
+        profileName: profileName,
+        profileLastname: profileLastname,
+        className: classData.className,
+        startTime: classData.startTime,
+        endTime: classData.endTime,
+        attendance: true,
+      });
+    } else if (attendanceStatus === true) {
+      // Cambiar el estado de asistencia a false
+      participants[participantIndex].attendance = false;
+      await classRef.update({ participants });
+
+      // Eliminar el registro correspondiente en attendanceHistory
+      const historySnapshot = await attendanceHistoryRef
+        .where('gymId', '==', gymId)
+        .where('activityId', '==', classId)
+        .where('profileId', '==', profileId)
+        .get();
+
+      const batch = db.batch();
+      historySnapshot.forEach((doc) => {
+        batch.delete(doc.ref);
+      });
+      await batch.commit();
+
+      // Responder con los datos actualizados
+      res.status(200).json({
+        message: 'Attendance cancelled successfully.',
+        profileName: profileName,
+        profileLastname: profileLastname,
+        className: classData.className,
+        startTime: classData.startTime,
+        endTime: classData.endTime,
+        attendance: false,
+      });
+    } else {
+      res.status(400).json({ message: 'Invalid attendance status.' });
+    }
+  } catch (error) {
+    console.error('Error handling attendance:', error);
+    res.status(500).json({ message: 'Internal server error.' });
+  }
+};
+
 module.exports = {
   createClass,
   createPrimaryClasses,
@@ -1274,6 +1518,7 @@ module.exports = {
   updatePrimaryClasses,
   generateClassReport,
   getTrainers,
+  changeMemberAttendanceStatus,
   addParticipants,
   removeParticipant,
   cancelClass,
