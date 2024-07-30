@@ -250,18 +250,36 @@ const getAllClasses = async (req, res) => {
       .get();
 
     const classesArray = [];
-    response.forEach((doc) => {
+    for (const doc of response.docs) {
       const data = doc.data();
+      const classId = doc.id;
+
+      // Obtener participantes conocidos
+      const participantsSnapshot = await doc.ref
+        .collection('participants')
+        .get();
+      const participants = participantsSnapshot.docs.map((participantDoc) =>
+        participantDoc.data()
+      );
+
+      // Obtener participantes desconocidos
+      const unknownParticipantsSnapshot = await doc.ref
+        .collection('unknownParticipants')
+        .get();
+      const unknownParticipants = unknownParticipantsSnapshot.docs.map(
+        (unknownParticipantDoc) => unknownParticipantDoc.data()
+      );
+
       const membership = {
-        id: doc.id,
+        id: classId,
         classId: data.classId,
-        description: data.description, // Si descriptions no está definido, usar un array vacío
-        gymId: data.gymId, // Si gymId no está definido, usar una cadena vacía
+        description: data.description || [],
+        gymId: data.gymId || '',
         activityType: data.activityType,
         classCapacity: data.classCapacity,
         className: data.className,
         selectedWeekDays: data.selectedWeekDays,
-        selectTrainer: data.selectTrainer, // Si planName no está definido, usar una cadena vacía
+        selectTrainer: data.selectTrainer || '',
         startTime: data.startTime,
         endTime: data.endTime,
         eventDate: data.eventDate,
@@ -270,18 +288,17 @@ const getAllClasses = async (req, res) => {
         repeatDaily: data.repeatDaily,
         weekDays: data.weekDays,
         expirationDate: data.expirationDate,
-        participants: data?.participants,
-        currentClassParticipants: data?.currentClassParticipants,
-        classesCancelled: data?.classesCancelled,
-        personalClassId: data?.personalClassId,
-        unknownClassCapacity: data?.unknownClassCapacity,
-        unknownParticipants: data?.unknownParticipants,
-        currentUnkwnownClassParticipants:
-          data?.currentUnkwnownClassParticipants,
-        attendance: data?.attendance,
+        participants: participants,
+        currentClassParticipants: data.currentClassParticipants,
+        classesCancelled: data.classesCancelled,
+        personalClassId: data.personalClassId,
+        unknownClassCapacity: data.unknownClassCapacity,
+        unknownParticipants: unknownParticipants,
+        currentUnknownClassParticipants: data.currentUnknownClassParticipants,
+        attendance: data.attendance,
       };
       classesArray.push(membership);
-    });
+    }
 
     // Envía la respuesta como una matriz de perfiles directamente
     res.status(200).json(classesArray);
@@ -306,19 +323,22 @@ const deleteAllClasses = async (req, res) => {
     const failedClasses = []; // Almacenar las clases que no se pueden eliminar
 
     const batch = db.batch();
-    classesSnapshot.forEach((classDoc) => {
-      const classData = classDoc.data();
-      // Verificar si la clase tiene participantes
-      if (classData.participants && classData.participants.length > 0) {
+
+    for (const classDoc of classesSnapshot.docs) {
+      const participantsSnapshot = await classDoc.ref
+        .collection('participants')
+        .get();
+
+      if (!participantsSnapshot.empty) {
         // La clase tiene participantes, por lo que no se puede eliminar
         failedClasses.push({
-          eventDate: classData.eventDate, // Guardar la fecha de la clase que no se puede eliminar
+          eventDate: classDoc.data().eventDate, // Guardar la fecha de la clase que no se puede eliminar
         });
       } else {
         // La clase no tiene participantes, se puede eliminar
         batch.delete(classDoc.ref);
       }
-    });
+    }
 
     await batch.commit();
 
@@ -340,6 +360,56 @@ const deleteAllClasses = async (req, res) => {
     });
   }
 };
+
+// const deleteAllClasses = async (req, res) => {
+//   try {
+//     const gymId = req.body.gymId; // Obtiene el gymId del cuerpo de la solicitud
+//     const personalClassId = req.params.personalClassId; // Obtiene el personalClassId de los parámetros de la URL
+
+//     // Obtener todas las clases asociadas con el personalClassId
+//     const classesSnapshot = await db
+//       .collection('classes')
+//       .where('gymId', '==', gymId)
+//       .where('personalClassId', '==', personalClassId)
+//       .get();
+
+//     const failedClasses = []; // Almacenar las clases que no se pueden eliminar
+
+//     const batch = db.batch();
+//     classesSnapshot.forEach((classDoc) => {
+//       const classData = classDoc.data();
+//       // Verificar si la clase tiene participantes
+//       if (classData.participants && classData.participants.length > 0) {
+//         // La clase tiene participantes, por lo que no se puede eliminar
+//         failedClasses.push({
+//           eventDate: classData.eventDate, // Guardar la fecha de la clase que no se puede eliminar
+//         });
+//       } else {
+//         // La clase no tiene participantes, se puede eliminar
+//         batch.delete(classDoc.ref);
+//       }
+//     });
+
+//     await batch.commit();
+
+//     if (failedClasses.length > 0) {
+//       // Devolver las clases que no se pudieron eliminar debido a que tienen participantes
+//       res.status(400).json({
+//         message: `Some classes associated with personalClassId ${personalClassId} have participants and cannot be deleted`,
+//         failedClasses: failedClasses,
+//       });
+//     } else {
+//       res.status(200).json({
+//         message: `Classes associated with personalClassId ${personalClassId} deleted successfully`,
+//       });
+//     }
+//   } catch (error) {
+//     console.error('Error deleting classes:', error);
+//     res.status(500).json({
+//       message: 'An error occurred while deleting the classes',
+//     });
+//   }
+// };
 
 const deleteClass = async (req, res) => {
   try {
@@ -473,7 +543,7 @@ const getTrainers = async (req, res) => {
 
 const addParticipants = async (req, res) => {
   try {
-    const participants = req.body.memberForm; // Extraer el participante de req.body.memberForm
+    const participants = req.body.memberForm; // Extraer los participantes de req.body.memberForm
     const classId = req.body.classId;
 
     const memberForm = participants[participants.length - 1];
@@ -495,37 +565,91 @@ const addParticipants = async (req, res) => {
     // Verificar si la clase existe
     const classDoc = await classDocRef.get();
 
-    // Si la clase no existe, crear un nuevo documento con el campo participants inicializado en 1
+    // Si la clase no existe, crear un nuevo documento con el campo currentClassParticipants inicializado en 0
     if (!classDoc.exists) {
       await classDocRef.set({
-        participants: [participant],
-        currentClassParticipants: 1,
-      });
-
-      return res.status(200).json({
-        message: 'Participante agregado con éxito',
-        currentClassParticipants: 1,
+        currentClassParticipants: 0,
       });
     }
 
-    // Obtener el campo de participantes actual
-    const currentParticipants = classDoc.data().participants || [];
+    // Obtener la referencia a la subcolección de participantes
+    const participantsCollection = classDocRef.collection('participants');
 
-    // Actualizar el campo de participantes utilizando arrayUnion
+    // Añadir el nuevo participante a la subcolección usando profileId como ID del documento
+    await participantsCollection.doc(memberForm.profileId).set(participant);
+
+    // Actualizar el campo de participantes actual
+    const currentParticipantsCount = (await participantsCollection.get()).size;
+
     await classDocRef.update({
-      participants: admin.firestore.FieldValue.arrayUnion(participant),
-      currentClassParticipants: currentParticipants.length + 1,
+      currentClassParticipants: currentParticipantsCount,
     });
 
     return res.status(200).json({
       message: 'Participante agregado con éxito',
-      currentClassParticipants: currentParticipants.length + 1,
+      currentClassParticipants: currentParticipantsCount,
     });
   } catch (error) {
     console.error('Error al agregar participante y generar QR:', error);
     return res.status(500).json({ message: 'Error interno del servidor' });
   }
 };
+
+// const addParticipants = async (req, res) => {
+//   try {
+//     const participants = req.body.memberForm; // Extraer el participante de req.body.memberForm
+//     const classId = req.body.classId;
+
+//     const memberForm = participants[participants.length - 1];
+//     const qrData = `${memberForm.profileId},${classId}`;
+
+//     const qrCode = await generateQRCode(qrData);
+//     const participant = {
+//       ...memberForm,
+//       attendance: false,
+//       qrCode: qrCode,
+//     };
+
+//     // Obtener la referencia a la colección de clases
+//     const classesCollection = db.collection('classes');
+
+//     // Obtener la referencia al documento de la clase por ID
+//     const classDocRef = classesCollection.doc(classId);
+
+//     // Verificar si la clase existe
+//     const classDoc = await classDocRef.get();
+
+//     // Si la clase no existe, crear un nuevo documento con el campo participants inicializado en 1
+//     if (!classDoc.exists) {
+//       await classDocRef.set({
+//         participants: [participant],
+//         currentClassParticipants: 1,
+//       });
+
+//       return res.status(200).json({
+//         message: 'Participante agregado con éxito',
+//         currentClassParticipants: 1,
+//       });
+//     }
+
+//     // Obtener el campo de participantes actual
+//     const currentParticipants = classDoc.data().participants || [];
+
+//     // Actualizar el campo de participantes utilizando arrayUnion
+//     await classDocRef.update({
+//       participants: admin.firestore.FieldValue.arrayUnion(participant),
+//       currentClassParticipants: currentParticipants.length + 1,
+//     });
+
+//     return res.status(200).json({
+//       message: 'Participante agregado con éxito',
+//       currentClassParticipants: currentParticipants.length + 1,
+//     });
+//   } catch (error) {
+//     console.error('Error al agregar participante y generar QR:', error);
+//     return res.status(500).json({ message: 'Error interno del servidor' });
+//   }
+// };
 
 // Función para generar el código QR y retornarlo como base64
 const generateQRCode = async (qrData) => {
@@ -613,7 +737,7 @@ const addUnknownParticipants = async (req, res) => {
 
     if (prepaymentType !== 1 && prepaymentType !== 3) {
       return res.status(400).json({
-        message: 'This members package does not allow creating classes',
+        message: "This member's package does not allow creating classes",
       });
     }
 
@@ -639,33 +763,39 @@ const addUnknownParticipants = async (req, res) => {
     // Verifica si la clase existe
     const classDoc = await classDocRef.get();
 
-    // Si la clase no existe, crea un nuevo documento con el campo participants inicializado en 1
     if (!classDoc.exists) {
       await classDocRef.set({
-        unknownParticipants: participants,
-        currentUnkwnownClassParticipants: 1,
-      });
-
-      return res.status(200).json({
-        message: 'Participantes agregados con éxito',
-        currentUnkwnownClassParticipants: 1,
+        currentUnknownClassParticipants: 0,
       });
     }
 
-    // Obtiene el campo de participantes actual
-    const currentParticipants = classDoc.data().unknownParticipants || [];
+    // Obtén una referencia a la subcolección de participantes desconocidos
+    const unknownParticipantsCollection = classDocRef.collection(
+      'unknownParticipants'
+    );
+    const batch = db.batch();
 
-    // Actualiza el campo de participantes utilizando arrayUnion
+    participants.forEach((participant) => {
+      const participantDocRef = unknownParticipantsCollection.doc(
+        participant.profileId
+      ); // Usa profileId como ID del documento
+      batch.set(participantDocRef, participant);
+    });
+
+    await batch.commit();
+
+    // Obtener el número de participantes actualizados
+    const updatedParticipantsSnapshot =
+      await unknownParticipantsCollection.get();
+    const currentUnknownClassParticipants = updatedParticipantsSnapshot.size;
+
     await classDocRef.update({
-      unknownParticipants: admin.firestore.FieldValue.arrayUnion(
-        ...participants
-      ),
-      currentUnkwnownClassParticipants: currentParticipants.length + 1,
+      currentUnknownClassParticipants: currentUnknownClassParticipants,
     });
 
     return res.status(200).json({
       message: 'Participantes agregados con éxito',
-      currentUnkwnownClassParticipants: currentParticipants.length + 1,
+      currentUnknownClassParticipants: currentUnknownClassParticipants,
     });
   } catch (error) {
     console.error('Error al agregar participantes:', error);
@@ -691,23 +821,29 @@ const removeParticipant = async (req, res) => {
       return res.status(404).json({ message: 'Clase no encontrada' });
     }
 
-    // Obtén los participantes actuales de la clase
-    const currentParticipants = classDoc.data().participants || [];
+    // Obtén una referencia a la subcolección de participantes
+    const participantsCollection = classDocRef.collection('participants');
 
-    // Filtra los participantes para excluir al participante con deletedProfileId
-    const updatedParticipants = currentParticipants.filter(
-      (participant) => participant.profileId !== deletedProfileId
-    );
+    // Elimina el participante directamente usando profileId como ID del documento
+    const participantDocRef = participantsCollection.doc(deletedProfileId);
+    const participantDoc = await participantDocRef.get();
 
-    // Actualiza el campo de participantes en el documento de la clase
+    if (!participantDoc.exists) {
+      return res
+        .status(404)
+        .json({ message: 'Participante no encontrado en la clase' });
+    }
+
+    await participantDocRef.delete();
+
+    // Obtén el número de participantes restantes
+    const updatedParticipantsSnapshot = await participantsCollection.get();
+    const currentClassParticipants = updatedParticipantsSnapshot.size;
+
+    // Actualiza el campo currentClassParticipants en el documento de la clase
     await classDocRef.update({
-      participants: updatedParticipants,
-      currentClassParticipants: updatedParticipants.length,
+      currentClassParticipants: currentClassParticipants,
     });
-
-    // Obtiene la clase actualizada para contar el número de participantes
-    const updatedClassDoc = await classDocRef.get();
-    const currentClassParticipants = updatedClassDoc.data().participants.length;
 
     // Devuelve una respuesta exitosa junto con el nuevo número de participantes
     res.status(200).json({
@@ -736,33 +872,41 @@ const removeUnknownParticipant = async (req, res) => {
       return res.status(404).json({ message: 'Class not found' });
     }
 
-    // Obtén los participantes actuales de la clase
-    const currentParticipants = classDoc.data().unknownParticipants || [];
-
-    // Filtra los participantes para excluir al participante con deletedProfileId
-    const updatedParticipants = currentParticipants.filter(
-      (participant) => participant.profileId !== deletedProfileId
+    // Obtén la subcolección de participantes desconocidos
+    const unknownParticipantsCollection = classDocRef.collection(
+      'unknownParticipants'
     );
 
-    // Actualiza el campo de participantes en el documento de la clase
-    await classDocRef.update({
-      unknownParticipants: updatedParticipants,
-      currentUnkwnownClassParticipants: updatedParticipants.length,
-    });
+    // Elimina el documento del participante usando profileId como ID
+    const participantDocRef =
+      unknownParticipantsCollection.doc(deletedProfileId);
+    const participantDoc = await participantDocRef.get();
 
-    // Obtiene la clase actualizada para contar el número de participantes
-    const updatedClassDoc = await classDocRef.get();
-    const currentClassParticipants =
-      updatedClassDoc.data().unknownParticipants.length;
+    if (!participantDoc.exists) {
+      return res.status(404).json({ message: 'Participant not found' });
+    }
+
+    // Elimina el documento del participante
+    await participantDocRef.delete();
+
+    // Obtiene la cantidad actualizada de participantes
+    const updatedParticipantsSnapshot =
+      await unknownParticipantsCollection.get();
+    const currentUnknownClassParticipants = updatedParticipantsSnapshot.size;
+
+    // Actualiza el número de participantes en el documento de la clase
+    await classDocRef.update({
+      currentUnknownClassParticipants: currentUnknownClassParticipants,
+    });
 
     // Devuelve una respuesta exitosa junto con el nuevo número de participantes
     res.status(200).json({
-      message: 'Participante eliminado con éxito',
-      currentUnkwnownClassParticipants: currentClassParticipants,
+      message: 'Participant removed successfully',
+      currentUnknownClassParticipants: currentUnknownClassParticipants,
     });
   } catch (error) {
-    console.error('Error al eliminar participante:', error);
-    res.status(500).json({ message: 'Error interno del servidor' });
+    console.error('Error removing participant:', error);
+    res.status(500).json({ message: 'Internal server error' });
   }
 };
 
@@ -992,8 +1136,20 @@ const generateClassReport = async (req, res) => {
       classData.startTime,
       classData.endTime
     );
-    const participants = classData.participants || [];
-    const unknownParticipants = classData.unknownParticipants || [];
+
+    // Obtén los participantes miembros desde la subcolección 'participants'
+    const participantsSnapshot = await classDoc.ref
+      .collection('participants')
+      .get();
+    const participants = participantsSnapshot.docs.map((doc) => doc.data());
+
+    // Obtén los participantes desconocidos desde la subcolección 'unknownParticipants'
+    const unknownParticipantsSnapshot = await classDoc.ref
+      .collection('unknownParticipants')
+      .get();
+    const unknownParticipants = unknownParticipantsSnapshot.docs.map((doc) =>
+      doc.data()
+    );
 
     // Obtén los datos de los perfiles de los participantes
     const participantsPromises = participants.map((participant) =>
@@ -1002,7 +1158,7 @@ const generateClassReport = async (req, res) => {
     const participantDocs = await Promise.all(participantsPromises);
     const participantProfiles = participantDocs.map((doc) => doc.data());
 
-    // Obtén los datos de los perfiles de los non members
+    // Obtén los datos de los perfiles de los no miembros
     const unknownParticipantsPromises = unknownParticipants.map((participant) =>
       db.collection('profiles').doc(participant.profileId).get()
     );
@@ -1428,19 +1584,23 @@ const changeMemberAttendanceStatus = async (req, res) => {
     }
 
     const classData = classDoc.data();
-    const participants = classData.participants;
 
-    // Encontrar el participante
-    const participantIndex = participants.findIndex(
-      (p) => p.profileId === profileId
-    );
-    if (participantIndex === -1) {
+    // Obtener la subcolección de participants
+    const participantsCollectionRef = classRef.collection('participants');
+
+    // Buscar el participante en la subcolección
+    const participantQuery = await participantsCollectionRef
+      .where('profileId', '==', profileId)
+      .get();
+
+    if (participantQuery.empty) {
       return res
         .status(404)
         .json({ message: 'Participant not found in the class.' });
     }
 
-    const participant = participants[participantIndex];
+    const participantDoc = participantQuery.docs[0];
+    const participant = participantDoc.data();
     const attendanceStatus = participant.attendance;
 
     if (attendanceStatus === false) {
@@ -1454,9 +1614,8 @@ const changeMemberAttendanceStatus = async (req, res) => {
         role: 'member',
       });
 
-      // Actualizar el estado de asistencia a true
-      participants[participantIndex].attendance = true;
-      await classRef.update({ participants });
+      // Actualizar el estado de asistencia a true en la subcolección
+      await participantDoc.ref.update({ attendance: true });
 
       // Responder con los datos actualizados
       res.status(200).json({
@@ -1469,9 +1628,8 @@ const changeMemberAttendanceStatus = async (req, res) => {
         attendance: true,
       });
     } else if (attendanceStatus === true) {
-      // Cambiar el estado de asistencia a false
-      participants[participantIndex].attendance = false;
-      await classRef.update({ participants });
+      // Cambiar el estado de asistencia a false en la subcolección
+      await participantDoc.ref.update({ attendance: false });
 
       // Eliminar el registro correspondiente en attendanceHistory
       const historySnapshot = await attendanceHistoryRef

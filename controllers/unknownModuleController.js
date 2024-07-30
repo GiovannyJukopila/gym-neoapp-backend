@@ -538,70 +538,54 @@ const sendUnknownMemberAttendance = async (req, res) => {
     if (selectedOption === 'class') {
       const classId = selectedValue.classId;
       activityId = classId;
-      const unknownClassCapacity = selectedValue?.unknownClassCapacity
-        ? selectedValue?.unknownClassCapacity
-        : 0;
+      const unknownClassCapacity = selectedValue?.unknownClassCapacity || 0;
 
-      const isUndefinedUnknownClassCapacity =
-        selectedValue?.unknownClassCapacity ?? 0;
-
-      if (!isUndefinedUnknownClassCapacity) {
+      if (unknownClassCapacity <= 0) {
         return res.status(400).json({
           message: 'There are no available slots in the selected class',
         });
       }
 
-      let remainingCapacity;
-      if (
-        selectedValue.unknownParticipants &&
-        selectedValue.unknownParticipants.length >= 0
-      ) {
-        const currentParticipants = selectedValue.unknownParticipants.length;
-
-        remainingCapacity = unknownClassCapacity - currentParticipants;
-        if (remainingCapacity <= 0) {
-          return res.status(400).json({
-            message: 'There are no available slots in the selected class',
-          });
-        }
-      } else {
-        remainingCapacity = unknownClassCapacity;
-      }
       const classesCollection = db.collection('classes');
       const classDocRef = classesCollection.doc(classId);
       const classDoc = await classDocRef.get();
+
       if (!classDoc.exists) {
         return res.status(404).json({
           message: 'Class not found',
         });
       }
 
-      // Verificar si el perfil de la persona ya está en unknownParticipants
-      let unknownParticipants =
-        selectedValue && selectedValue.unknownParticipants
-          ? [...selectedValue.unknownParticipants]
-          : [];
-
-      const isParticipantExist = unknownParticipants.some(
-        (participant) => participant.profileId === profileDetails.profileId
+      // Obtener la referencia a la subcolección de unknownParticipants
+      const unknownParticipantsCollectionRef = classDocRef.collection(
+        'unknownParticipants'
       );
 
-      if (!isParticipantExist) {
-        // Si el perfil de la persona no está en unknownParticipants, agregarlo
+      // Buscar si el perfil ya está en unknownParticipants
+      const participantQuery = await unknownParticipantsCollectionRef
+        .where('profileId', '==', profileId)
+        .get();
+
+      if (participantQuery.empty) {
+        // Agregar el nuevo participante si no está en la subcolección
         const participantDetails = {
           ...profileDetails,
           profileTelephoneNumber: profileDetails.unknownMemberPhoneNumber,
           profileEmail: profileDetails.unknownMemberEmail,
-          // Agregar otros detalles del participante según sea necesario
         };
         delete participantDetails.unknownMemberPhoneNumber;
         delete participantDetails.unknownMemberEmail;
 
+        await unknownParticipantsCollectionRef.add(participantDetails);
+
+        // Actualizar el campo currentUnkwnownClassParticipants
+        const updatedUnknownParticipantsSnapshot =
+          await unknownParticipantsCollectionRef.get();
+        const currentUnkwnownClassParticipants =
+          updatedUnknownParticipantsSnapshot.size;
+
         await classDocRef.update({
-          unknownParticipants:
-            admin.firestore.FieldValue.arrayUnion(participantDetails),
-          currentUnkwnownClassParticipants:
-            admin.firestore.FieldValue.increment(1),
+          currentUnkwnownClassParticipants: currentUnkwnownClassParticipants,
         });
       }
     } else {
@@ -609,7 +593,7 @@ const sendUnknownMemberAttendance = async (req, res) => {
     }
 
     if (!deductedAtBooking) {
-      // Restar 1 crédito del currentCredit del memberForm
+      // Restar 1 crédito del currentCredit del profileDetails
       profileDetails.currentCredit--;
 
       // Actualizar el currentCredit en el perfil de la persona
@@ -619,6 +603,7 @@ const sendUnknownMemberAttendance = async (req, res) => {
       });
     }
 
+    // Agregar entrada en el historial de asistencia
     const attendanceHistoryRef = db.collection('attendanceHistory');
     await attendanceHistoryRef.add({
       gymId: profileDetails.gymId,

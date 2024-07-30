@@ -265,8 +265,7 @@ const getMembershipSnapshot = async (membershipId) => {
 };
 
 const markClassMemberAttendance = async (req, res) => {
-  const profileId = req.params.profileId;
-  const classId = req.params.classId;
+  const { profileId, classId } = req.params;
 
   try {
     // Referencia al documento de la clase
@@ -326,19 +325,21 @@ const markClassMemberAttendance = async (req, res) => {
       });
     }
 
-    // Filtrar el array participants para encontrar el profileId
-    const participant = classData.participants.find(
-      (participant) => participant.profileId === profileId
-    );
+    // Obtener la subcolección participants de la clase
+    const participantsCollectionRef = classRef.collection('participants');
+    const participantDoc = await participantsCollectionRef.doc(profileId).get();
 
-    if (!participant) {
+    if (!participantDoc.exists) {
       return res
         .status(404)
         .json({ message: 'Participant not found in class.' });
     }
 
+    // Obtener los datos del participante
+    const participantData = participantDoc.data();
+
     // Verificar si la asistencia ya fue marcada
-    if (participant.attendance === true) {
+    if (participantData.attendance === true) {
       return res
         .status(400)
         .json({ message: 'Attendance already marked for this class.' });
@@ -354,7 +355,7 @@ const markClassMemberAttendance = async (req, res) => {
       return res.status(404).json({ message: 'Profile not found.' });
     }
 
-    // Obtener el cardSerialNumber y otros datos del perfil
+    // Obtener los datos del perfil
     const profileData = profileDoc.data();
     const cardSerialNumber = profileData.cardSerialNumber;
     const profileName = profileData.profileName;
@@ -381,16 +382,8 @@ const markClassMemberAttendance = async (req, res) => {
       role: 'member',
     });
 
-    // Actualizar el array participants para marcar la asistencia
-    const updatedParticipants = classData.participants.map((participant) => {
-      if (participant.profileId === profileId) {
-        return { ...participant, attendance: true };
-      }
-      return participant;
-    });
-
-    // Actualizar el documento de la clase con el array participants modificado
-    await classRef.update({ participants: updatedParticipants });
+    // Actualizar el documento del participante para marcar la asistencia
+    await participantsCollectionRef.doc(profileId).update({ attendance: true });
 
     // Responder con los datos necesarios
     res.status(200).json({
