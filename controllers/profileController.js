@@ -149,6 +149,7 @@ const getAllProfiles = async (req, res) => {
     const response = await getProfilesCollection
       .where('gymId', '==', gymId) // Filtrar perfiles por gymId
       .where('role', 'array-contains', 'member') // Verifica si el array contiene 'member'
+      .orderBy('profileStartDate', 'desc')
       .limit(itemsPerPage)
       .offset(offset)
       .get();
