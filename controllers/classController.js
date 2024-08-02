@@ -1117,6 +1117,14 @@ const formatEventDateTime = (eventDate, startDate, endDate) => {
   }
 };
 
+const formatTimestamp = (timestamp) => {
+  if (!timestamp || !timestamp.toDate) {
+    return 'N/A'; // Manejo para casos donde el timestamp no sea válido
+  }
+  const dateObject = timestamp.toDate(); // Convertir el Timestamp a un objeto Date
+  return dateObject.toLocaleString(); // Formatear la fecha como string legible
+};
+
 const generateClassReport = async (req, res) => {
   const { gymId } = req.params;
   const { classId } = req.body;
@@ -1256,78 +1264,100 @@ const generateClassReport = async (req, res) => {
     doc.moveDown(); // Mover más abajo
     doc.fillColor('black');
     doc.fontSize(12); // Cambiar color a negro
-    doc.text(`• Total Members Participants: ${participants.length}`);
-    doc.text(`• Total Non-Members Participants: ${unknownParticipants.length}`);
-    doc.moveDown();
 
-    // Tabla de miembros participantes
-    if (participantProfiles.length > 0) {
-      const membersTableData = participantProfiles.map((profile) => [
-        `${profile.profileName || 'N/A'} ${profile.profileLastname || 'N/A'}`,
-        profile.profileEmail || 'N/A',
-        profile.cardSerialNumber || 'N/A',
-        profile.profileTelephoneNumber || 'N/A',
-      ]);
+    // Totales de participantes y asistentes
+    const totalMembersParticipants = participants.length;
+    const totalNonMembersParticipants = unknownParticipants.length;
+    const totalMembersAttendance = memberParticipants.length;
+    const totalNonMembersAttendance = nonMemberParticipants.length;
 
-      const membersTableHeaders = [
-        'Name',
-        'Email',
-        'Card Serial Number',
-        'Telephone',
-      ];
+    const totalsTableHeaders = [
+      'Type',
+      'Total Participants',
+      'Total Attendance',
+    ];
+    const totalsTableData = [
+      ['Members', totalMembersParticipants, totalMembersAttendance],
+      ['Non-Members', totalNonMembersParticipants, totalNonMembersAttendance],
+    ];
 
-      await generateTable(
-        'Members Participants',
-        membersTableHeaders,
-        membersTableData,
-        doc
-      );
-      doc.moveDown();
-    }
+    // Generar tabla de totales
+    generateSimpleTable(
+      'Total Participants and Attendance',
+      totalsTableData,
+      totalsTableHeaders,
+      doc
+    );
 
-    // Tabla de no miembros participantes
-    if (unknownParticipantProfiles.length > 0) {
-      const unknownTableData = unknownParticipantProfiles.map((profile) => [
-        `${profile.profileName || 'N/A'}`,
-        profile.unknownMemberEmail || 'N/A',
-        profile.cardSerialNumber || 'N/A',
-        profile.unknownMemberPhoneNumber || 'N/A',
-      ]);
+    // Datos de los participantes y asistentes
+    const tablesByType = {
+      'Members Participants': {
+        headers: ['Name', 'Email', 'Card Serial Number', 'Telephone'],
+        data: participantProfiles.map((profile) => [
+          `${profile.profileName || 'N/A'} ${profile.profileLastname || 'N/A'}`,
+          profile.profileEmail || 'N/A',
+          profile.cardSerialNumber || 'N/A',
+          profile.profileTelephoneNumber || 'N/A',
+        ]),
+      },
+      'Non-Members Participants': {
+        headers: ['Name', 'Email', 'Card Serial Number', 'Telephone'],
+        data: unknownParticipantProfiles.map((profile) => [
+          `${profile.profileName || 'N/A'}`,
+          profile.unknownMemberEmail || 'N/A',
+          profile.cardSerialNumber || 'N/A',
+          profile.unknownMemberPhoneNumber || 'N/A',
+        ]),
+      },
+      'Members Attendance': {
+        headers: [
+          'Name',
+          'Email',
+          'Attendance Status',
+          'Attendance Date',
+          'Card Serial Number',
+        ],
+        data: memberProfilesData.map((profile, index) => [
+          `${profile.profileName || 'N/A'} ${profile.profileLastname || 'N/A'}`,
+          profile.profileEmail || 'N/A',
+          'Attended',
+          memberAttendanceData[index].attendanceDate
+            ? formatTimestamp(memberAttendanceData[index].attendanceDate)
+            : 'N/A',
+          `${memberAttendanceData[index].cardSerialNumber || 'N/A'}`,
+        ]),
+      },
+      'Non-Members Attendance': {
+        headers: [
+          'Name',
+          'Email',
+          'Attendance Status',
+          'Attendance Date',
+          'Current Credit',
+          'Card Serial Number',
+        ],
+        data: nonMemberProfilesData.map((profile, index) => [
+          `${profile.profileName || 'N/A'}`,
+          profile.unknownMemberEmail || 'N/A',
+          'Attended',
+          nonMemberAttendanceData[index].attendanceDate
+            ? formatTimestamp(nonMemberAttendanceData[index].attendanceDate)
+            : 'N/A',
+          `${nonMemberAttendanceData[index].currentCredit || 'N/A'}`,
+          `${nonMemberAttendanceData[index].cardSerialNumber || 'N/A'}`,
+        ]),
+      },
+    };
 
-      const unknownTableHeaders = [
-        'Name',
-        'Email',
-        'Card Serial Number',
-        'Telephone',
-      ];
-
-      await generateTable(
-        'Non-Members Participants',
-        unknownTableHeaders,
-        unknownTableData,
-        doc
-      );
-      doc.moveDown();
-    }
-
-    // Tabla de asistencia de no miembros
-    if (nonMemberProfilesData.length > 0) {
-      await generateNonMembersAttendanceTable(
-        nonMemberProfilesData,
-        nonMemberAttendanceData,
-        doc
-      );
-      doc.moveDown();
-    }
-
-    // Tabla de asistencia de miembros
-    if (memberProfilesData.length > 0) {
-      await generateMembersAttendanceTable(
-        memberProfilesData,
-        memberAttendanceData,
-        doc
-      );
-      doc.moveDown();
+    for (const tableType in tablesByType) {
+      const { headers, data } = tablesByType[tableType];
+      if (data.length > 0) {
+        // Verificar si hay suficiente espacio en la página actual
+        if (doc.y + 300 > doc.page.height) {
+          doc.addPage(); // Agregar una nueva página si no hay suficiente espacio
+        }
+        generateTable(tableType, data, headers, doc);
+      }
     }
 
     // Finalizar el documento
@@ -1338,92 +1368,25 @@ const generateClassReport = async (req, res) => {
   }
 };
 
-const generateMembersAttendanceTable = async (
-  memberProfilesData,
-  memberAttendanceData,
-  doc
-) => {
-  const membersAttendanceTableData = memberProfilesData.map(
-    (profile, index) => [
-      `${profile.profileName || 'N/A'} ${profile.profileLastname || 'N/A'}`,
-      profile.profileEmail || 'N/A',
-      'Attended', // Estado de asistencia ajustado según necesidades
-      memberAttendanceData[index].attendanceDate
-        ? formatTimestamp(memberAttendanceData[index].attendanceDate)
-        : 'N/A', // Formatear la fecha de asistencia
-      `${memberAttendanceData[index].cardSerialNumber || 'N/A'}`, // Número de tarjeta
-    ]
-  );
-
-  const membersAttendanceTableHeaders = [
-    'Name',
-    'Email',
-    'Attendance Status',
-    'Attendance Date',
-    'Card Serial Number',
-  ];
-
-  await generateTable(
-    'Members Attendance',
-    membersAttendanceTableHeaders,
-    membersAttendanceTableData,
-    doc
-  );
-};
-
-const generateNonMembersAttendanceTable = async (
-  nonMemberProfilesData,
-  nonMemberAttendanceData,
-  doc
-) => {
-  const nonMembersAttendanceTableData = nonMemberProfilesData.map(
-    (profile, index) => [
-      `${profile.profileName || 'N/A'}`,
-      profile.unknownMemberEmail || 'N/A',
-      'Attended', // Estado de asistencia ajustado según necesidades
-      nonMemberAttendanceData[index].attendanceDate
-        ? formatTimestamp(nonMemberAttendanceData[index].attendanceDate)
-        : 'N/A', // Formatear la fecha de asistencia
-      `${nonMemberAttendanceData[index].currentCredit || 'N/A'}`, // Crédito actual
-      `${nonMemberAttendanceData[index].cardSerialNumber || 'N/A'}`, // Número de tarjeta
-    ]
-  );
-
-  const nonMembersAttendanceTableHeaders = [
-    'Name',
-    'Email',
-    'Attendance Status',
-    'Attendance Date',
-    'Current Credit',
-    'Card Serial Number',
-  ];
-
-  await generateTable(
-    'Non-Members Attendance',
-    nonMembersAttendanceTableHeaders,
-    nonMembersAttendanceTableData,
-    doc
-  );
-};
-
-// Función para generar la tabla genérica
-const generateTable = async (title, headers, rows, doc) => {
+// Función para generar tablas simples
+function generateSimpleTable(title, tableData, tableHeaders, doc) {
   const table = {
-    title,
-    headers: headers.map((header, i) => ({
+    title: title,
+    headers: tableHeaders.map((header) => ({
       label: header,
-      property: `header_${i}`,
-      width: 80,
+      property: header.toLowerCase(),
+      width: 100,
       renderer: null,
     })),
-    rows: rows.map((row) => row.map((cell) => String(cell))), // Convertir todos los elementos a cadena
+    rows: tableData.map((data) => data.map((cell) => String(cell))),
   };
 
+  // Generar la tabla en el documento PDF
+  doc.moveDown(0.5);
   doc.table(table, {
     prepareHeader: () => doc.font('Helvetica-Bold').fontSize(10),
     prepareRow: (row, indexColumn, indexRow, rectRow, rectCell) => {
       doc.font('Helvetica').fontSize(10);
-      doc.text(row[`header_${indexColumn}`], rectCell.x + 5, rectCell.y + 5);
     },
     borderHorizontalWidths: (i) => 0.8,
     borderVerticalWidths: (i) => 0.8,
@@ -1431,14 +1394,48 @@ const generateTable = async (title, headers, rows, doc) => {
     padding: 10,
     margins: { top: 50, bottom: 50, left: 50, right: 50 },
   });
-};
-const formatTimestamp = (timestamp) => {
-  if (!timestamp || !timestamp.toDate) {
-    return 'N/A'; // Manejo para casos donde el timestamp no sea válido
-  }
-  const dateObject = timestamp.toDate(); // Convertir el Timestamp a un objeto Date
-  return dateObject.toLocaleString(); // Formatear la fecha como string legible
-};
+}
+
+function generateTable(tableType, tableData, tableHeaders, doc) {
+  // Configuración de márgenes y ancho de página
+  const pageWidth = doc.page.width;
+  const marginLeft = 50;
+  const marginRight = 50;
+  const contentWidth = pageWidth - marginLeft - marginRight;
+
+  // Calcular el ancho actual de todas las columnas
+  const currentTotalWidth = tableHeaders.length * 80;
+
+  // Calcular el ancho adicional para distribuir
+  const extraWidth = contentWidth - currentTotalWidth;
+  const extraWidthPerColumn = extraWidth / tableHeaders.length;
+
+  // Configurar las columnas con el nuevo ancho
+  const table = {
+    title: `${tableType}`,
+    headers: tableHeaders.map((header) => ({
+      label: header,
+      property: header.toLowerCase(),
+      width: 80 + extraWidthPerColumn, // Aumentar el ancho de cada columna
+      renderer: null,
+    })),
+    rows: tableData.map((data) => data.map((cell) => String(cell))),
+  };
+
+  // Generar la tabla en el documento PDF
+  doc.moveDown(1);
+  doc.table(table, {
+    prepareHeader: () => doc.font('Helvetica-Bold').fontSize(10),
+    prepareRow: (row, indexColumn, indexRow, rectRow, rectCell) => {
+      doc.font('Helvetica').fontSize(10);
+    },
+    borderHorizontalWidths: (i) => 0.8,
+    borderVerticalWidths: (i) => 0.8,
+    borderColor: (i) => (i === -1 ? 'black' : 'gray'),
+    padding: 10,
+    margins: { top: 50, bottom: 50, left: 50, right: 50 },
+  });
+}
 
 const createPrimaryClasses = async (req, res) => {
   try {
