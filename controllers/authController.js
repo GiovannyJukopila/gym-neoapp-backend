@@ -224,6 +224,7 @@ const getlogIn = async (req, res) => {
         profileId: profileData.profileId,
         profileName: profileData.profileName,
         profileLastname: profileData.profileLastname,
+        cardSerialNumber: profileData?.cardSerialNumber,
         profilePicture: profileData.profilePicture,
         membershipId: profileData.membershipId,
         profileAdminLevel: profileData.profileAdminLevel,
