@@ -5,27 +5,24 @@ const { db } = require('../firebase');
 const bodyParser = require('body-parser');
 const admin = require('firebase-admin');
 app.use(bodyParser.json());
-
-// Importa los módulos necesarios
 const nodemailer = require('nodemailer');
+require('dotenv').config();
 
-// Configura el transportador para enviar correos
+// Configura el transportador para AWS SES
 const transporter = nodemailer.createTransport({
-  host: 'smtp.gmail.com',
-  port: 465,
-  secure: true,
-  auth: {
-    user: 'goneoapp@gmail.com',
-    pass: 'sahv uasy fzei rykf',
+  SES: {
+    ses: new (require('@aws-sdk/client-ses').SESClient)({
+      region: process.env.AWS_REGION,
+      credentials: {
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+      },
+    }),
+    aws: require('@aws-sdk/client-ses'),
   },
-  from: 'goneoapp@gmail.com',
 });
 
 function buildCustomEmailContent(subject, content, image, reason) {
-  // Agrega una imagen si se proporciona la URL de la imagen
-  // const imageTag = image
-  //   ? `<img src="${image}" alt="Image" style="max-width: 100%; height: auto;" />`
-  //   : '';
   const button =
     reason === 'setup_password'
       ? `<a href="https://neoappgym.com/setup-password" class="button">Set Up Password</a>`
@@ -78,13 +75,12 @@ function buildCustomEmailContent(subject, content, image, reason) {
                 border-radius: 5px;
                 text-decoration: none;
             }
-            /* Subcard dentro del card */
             .subcard {
-                background-color: #fff; /* Fondo blanco para el subcard */
+                background-color: #fff;
                 border-radius: 5px;
                 box-shadow: 0 4px 8px 0 rgba(0, 0, 0, 0.2);
-                padding: 10px; /* Ajusta el relleno según tus necesidades */
-                margin: 50px; /* Espacio entre el card principal y el subcard */
+                padding: 10px;
+                margin: 50px;
             }
         </style>
     </head>
@@ -95,13 +91,9 @@ function buildCustomEmailContent(subject, content, image, reason) {
             </div>
             <div class="subcard">
             <div class="content">
-
                 <p>${content}</p>
                 ${button}
-
-
                 </div>
-
             </div>
             <div class="footer">
                 <p>Neo App &copy; 2024 - All rights reserved</p>
@@ -113,17 +105,14 @@ function buildCustomEmailContent(subject, content, image, reason) {
 }
 
 async function getMemberEmailsByGymId(gymId) {
-  const db = admin.firestore(); // Inicializa la base de datos Firestore
-
+  const db = admin.firestore();
   const memberEmails = [];
-
   try {
     const querySnapshot = await db
       .collection('profiles')
       .where('gymId', '==', gymId)
       .where('profileStatus', '==', 'true')
       .get();
-
     querySnapshot.forEach((doc) => {
       const profileData = doc.data();
       if (profileData.profileEmail) {
@@ -133,11 +122,9 @@ async function getMemberEmailsByGymId(gymId) {
   } catch (error) {
     console.error('Error fetching member emails:', error);
   }
-
   return memberEmails;
 }
 
-// Función para enviar un correo personalizado
 async function sendCustomEmail(
   recipient,
   subject,
@@ -149,30 +136,28 @@ async function sendCustomEmail(
   try {
     const attachments = [];
 
-    // Verificar si attachmentContent tiene un valor
     if (attachmentContent) {
       const base64Content = attachmentContent.split(';base64,').pop();
       attachments.push({
         filename: attachmentName,
         content: base64Content,
         encoding: 'base64',
-        contentType: attachmentType, // Agregar el tipo MIME del archivo adjunto
+        contentType: attachmentType,
       });
     }
 
     const info = await transporter.sendMail({
-      from: '"No Reply - NeoApp" <goneoapp@gmail.com>',
-      bcc: recipient,
+      from: '"No Reply - NeoApp" <no-reply@neoappgym.com>',
+      to: recipient,
       subject: subject,
       html: emailContent,
-      attachments: attachments, // Adjuntar solo si attachmentContent tiene un valor
+      attachments: attachments,
     });
   } catch (error) {
     console.error('Error sending email to ' + recipient + ':', error);
   }
 }
 
-// Controlador para la ruta /getNotification
 const getNotification = async (req, res) => {
   try {
     const { subject, content, image, recipient, reason, isForAll, gymId } =
@@ -180,12 +165,10 @@ const getNotification = async (req, res) => {
     let attachmentName = 'attachment';
     let attachmentType = 'application/octet-stream';
 
-    // Nombre del archivo adjunto
-    const imageFileName = 'image.png';
     if (image) {
       const mimeTypeDelimiterIndex = image.indexOf(';base64,');
       if (mimeTypeDelimiterIndex !== -1) {
-        const mimeType = image.substring(5, mimeTypeDelimiterIndex); // Eliminar 'data:'
+        const mimeType = image.substring(5, mimeTypeDelimiterIndex);
 
         if (mimeType === 'application/pdf') {
           attachmentName = 'document.pdf';
@@ -213,6 +196,7 @@ const getNotification = async (req, res) => {
         }
       }
     }
+
     function isValidEmail(email) {
       return /\S+@\S+\.\S+/.test(email);
     }
@@ -230,16 +214,18 @@ const getNotification = async (req, res) => {
             reason
           );
 
-          // Dividir la lista de correos en lotes de 100
           for (let i = 0; i < validEmails.length; i += 100) {
             const batchEmails = validEmails.slice(i, i + 100);
-            await sendCustomEmail(
-              batchEmails,
-              subject,
-              emailContent,
-              attachmentName,
-              attachmentType
-            );
+            for (const email of batchEmails) {
+              await sendCustomEmail(
+                email,
+                subject,
+                emailContent,
+                attachmentName,
+                attachmentType,
+                image
+              );
+            }
           }
         }
       } else {
@@ -251,9 +237,7 @@ const getNotification = async (req, res) => {
             subject,
             content,
             image,
-            reason,
-            attachmentName,
-            attachmentType
+            reason
           );
           await sendCustomEmail(
             email,
@@ -273,17 +257,18 @@ const getNotification = async (req, res) => {
         if (validEmails.length > 0) {
           const emailContent = buildCustomEmailContent(subject, content, image);
 
-          // Dividir la lista de correos en lotes de 100
           for (let i = 0; i < validEmails.length; i += 100) {
             const batchEmails = validEmails.slice(i, i + 100);
-            await sendCustomEmail(
-              batchEmails,
-              subject,
-              emailContent,
-              attachmentName,
-              attachmentType,
-              image
-            );
+            for (const email of batchEmails) {
+              await sendCustomEmail(
+                email,
+                subject,
+                emailContent,
+                attachmentName,
+                attachmentType,
+                image
+              );
+            }
           }
         }
       } else {

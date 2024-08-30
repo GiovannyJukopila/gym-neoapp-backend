@@ -1,6 +1,7 @@
 const express = require('express');
 const app = express();
 const { db } = require('../firebase');
+const { logMovement } = require('../utils/logMovement');
 const bodyParser = require('body-parser');
 const admin = require('firebase-admin');
 const moment = require('moment');
@@ -14,8 +15,10 @@ const createClass = async (req, res) => {
   try {
     const body = req.body;
     const gymId = req.query.gymId;
+    const profileId = body.profileId; // Asegúrate de que `profileId` esté en el body
 
     const eventDate = new Date(body.eventDate);
+    const classes = [];
 
     if (body.expirationDate !== null) {
       const expirationDate = new Date(body.expirationDate);
@@ -23,22 +26,15 @@ const createClass = async (req, res) => {
       const personalClassId = `personal-class-${gymId}-${gymClassSerialNumber}-${
         eventDate.toISOString().split('T')[0]
       }-${expirationDate.toISOString().split('T')[0]}`;
-      // Crear un arreglo para almacenar las clases
-      const classes = [];
 
       // Iterar sobre cada día entre eventDate y expirationDate
       const currentDate = new Date(eventDate);
       while (currentDate <= expirationDate) {
-        // Verificar si el día actual es uno de los días seleccionados
-        const dayOfWeek = currentDate.getDay(); // Domingo: 0, Lunes: 1, ..., Sábado: 6
+        const dayOfWeek = currentDate.getDay();
         if (body.selectedWeekDays.includes(dayOfWeek)) {
-          // Generar el número secuencial utilizando la función
           const classSerialNumber = await generateSequentialNumber(gymId);
-
-          // Generar el nombre del documento
           const classId = `class-${gymId}-${classSerialNumber}`;
 
-          // Crear un objeto de clase para este día
           const classObj = {
             classId: classId,
             gymId: gymId,
@@ -56,28 +52,19 @@ const createClass = async (req, res) => {
             classCapacity: body.classCapacity,
             description: body.description,
             selectedWeekDays: [dayOfWeek],
-            unknownClassCapacity: body?.unknownClassCapacity, // Se establece el día de la semana correspondiente
-            // Agregar aquí otros elementos específicos para cada clase
-            // ...
+            unknownClassCapacity: body?.unknownClassCapacity,
           };
 
-          // Agregar la clase al arreglo de clases
           classes.push(classObj);
         }
-
-        // Incrementar la fecha para el próximo día
         currentDate.setDate(currentDate.getDate() + 1);
       }
 
-      // Crear clase para el día de expiración
       const expirationDayOfWeek = expirationDate.getDay();
       if (body.selectedWeekDays.includes(expirationDayOfWeek)) {
-        // Generar el número secuencial utilizando la función
         const expirationClassSerialNumber = await generateSequentialNumber(
           gymId
         );
-
-        // Generar el nombre del documento para la clase de expiración
         const expirationClassId = `class-${gymId}-${expirationClassSerialNumber}`;
 
         const expirationClassObj = {
@@ -100,14 +87,11 @@ const createClass = async (req, res) => {
           classCapacity: body.classCapacity,
           description: body.description,
           selectedWeekDays: [expirationDayOfWeek],
-          unknownClassCapacity: body?.unknownClassCapacity, // Se establece el día de la semana correspondiente
-          // Agregar aquí otros elementos específicos para la clase de expiración
-          // ...
+          unknownClassCapacity: body?.unknownClassCapacity,
         };
         classes.push(expirationClassObj);
       }
 
-      // Guardar todas las clases en la base de datos
       const profilesCollection = db.collection('classes');
       const batch = db.batch();
       classes.forEach((classObj) => {
@@ -116,31 +100,28 @@ const createClass = async (req, res) => {
       });
       await batch.commit();
 
+      await logMovement(
+        profileId,
+        gymId,
+        'class',
+        'create',
+        classes.map((cls) => cls.classId)
+      );
+
       res.status(201).json({
         message: 'Classes created successfully',
         classes: classes,
       });
     } else if (body.selectedWeekDays && body.selectedWeekDays.length > 0) {
-      // Si no hay expirationDate pero hay días seleccionados, creamos clases para esos días
-
-      // Generar el número secuencial utilizando la función
       const gymClassSerialNumber = await generateSequentialNumber(gymId);
       const personalClassId = `personal-class-${gymId}-${gymClassSerialNumber}-${
         eventDate.toISOString().split('T')[0]
       }`;
 
-      // Crear un arreglo para almacenar las clases
-      const classes = [];
-
-      // Iterar sobre cada día seleccionado en body.selectedWeekDays
       for (const dayOfWeek of body.selectedWeekDays) {
-        // Generar el número secuencial utilizando la función
         const classSerialNumber = await generateSequentialNumber(gymId);
-
-        // Generar el nombre del documento
         const classId = `class-${gymId}-${classSerialNumber}`;
 
-        // Crear un objeto de clase para este día
         const classObj = {
           classId: classId,
           gymId: gymId,
@@ -157,16 +138,12 @@ const createClass = async (req, res) => {
           classCapacity: body.classCapacity,
           description: body.description,
           selectedWeekDays: [dayOfWeek],
-          unknownClassCapacity: body?.unknownClassCapacity, // Se establece el día de la semana correspondiente
-          // Agregar aquí otros elementos específicos para cada clase
-          // ...
+          unknownClassCapacity: body?.unknownClassCapacity,
         };
 
-        // Agregar la clase al arreglo de clases
         classes.push(classObj);
       }
 
-      // Guardar todas las clases en la base de datos
       const profilesCollection = db.collection('classes');
       const batch = db.batch();
       classes.forEach((classObj) => {
@@ -175,29 +152,38 @@ const createClass = async (req, res) => {
       });
       await batch.commit();
 
+      await logMovement(
+        profileId,
+        gymId,
+        'class',
+        'create',
+        classes.map((cls) => cls.classId)
+      );
+
       res.status(201).json({
         message: 'Classes created successfully',
         classes: classes,
       });
     } else {
-      // Si expirationDate es null, crear una sola clase
       const classSerialNumber = await generateSequentialNumber(gymId);
       const documentName = `class-${gymId}-${classSerialNumber}`;
       body.classId = documentName;
 
       const profilesCollection = db.collection('classes');
-      const newProfileRef = profilesCollection.doc(documentName);
-      await newProfileRef.set(body);
+      const newClassRef = profilesCollection.doc(documentName);
+      await newClassRef.set(body);
 
       const gymsCollection = db.collection('gyms');
       await gymsCollection.doc(gymId).update({
         classLastSerialNumber: documentName,
       });
 
+      await logMovement(profileId, gymId, 'class', 'create', [documentName]);
+
       res.status(201).json({
         message: 'Class created successfully',
         documentName,
-        body,
+        class: body,
       });
     }
   } catch (error) {
@@ -310,7 +296,14 @@ const getAllClasses = async (req, res) => {
 const deleteAllClasses = async (req, res) => {
   try {
     const gymId = req.body.gymId; // Obtiene el gymId del cuerpo de la solicitud
+    const profileId = req.body.profileId; // Obtiene el profileId del cuerpo de la solicitud
     const personalClassId = req.params.personalClassId; // Obtiene el personalClassId de los parámetros de la URL
+
+    if (!gymId || !profileId) {
+      return res
+        .status(400)
+        .json({ message: 'gymId and profileId are required' });
+    }
 
     // Obtener todas las clases asociadas con el personalClassId
     const classesSnapshot = await db
@@ -320,6 +313,7 @@ const deleteAllClasses = async (req, res) => {
       .get();
 
     const failedClasses = []; // Almacenar las clases que no se pueden eliminar
+    const deletedClassIds = []; // Almacenar los classId de las clases que se eliminan correctamente
 
     const batch = db.batch();
 
@@ -331,25 +325,38 @@ const deleteAllClasses = async (req, res) => {
       if (!participantsSnapshot.empty) {
         // La clase tiene participantes, por lo que no se puede eliminar
         failedClasses.push({
+          classId: classDoc.id, // Agregar el classId de la clase que no se puede eliminar
           eventDate: classDoc.data().eventDate, // Guardar la fecha de la clase que no se puede eliminar
         });
       } else {
         // La clase no tiene participantes, se puede eliminar
         batch.delete(classDoc.ref);
+        deletedClassIds.push(classDoc.id); // Agregar el classId de la clase eliminada
       }
     }
 
     await batch.commit();
+
+    // Registrar el movimiento
+    await logMovement(
+      profileId,
+      gymId,
+      'classes',
+      'deleteAll',
+      deletedClassIds
+    );
 
     if (failedClasses.length > 0) {
       // Devolver las clases que no se pudieron eliminar debido a que tienen participantes
       res.status(400).json({
         message: `Some classes associated with personalClassId ${personalClassId} have participants and cannot be deleted`,
         failedClasses: failedClasses,
+        deletedClassIds: deletedClassIds, // Devolver también las clases eliminadas correctamente
       });
     } else {
       res.status(200).json({
         message: `Classes associated with personalClassId ${personalClassId} deleted successfully`,
+        deletedClassIds: deletedClassIds, // Devolver las clases eliminadas correctamente
       });
     }
   } catch (error) {
@@ -412,26 +419,29 @@ const deleteAllClasses = async (req, res) => {
 
 const deleteClass = async (req, res) => {
   try {
-    const classId = req.params.classId;
+    const { classId } = req.params;
+    const { gymId, profileId } = req.body;
+
+    if (!gymId || !profileId) {
+      return res
+        .status(400)
+        .json({ message: 'gymId and profileId are required' });
+    }
+
     const db = admin.firestore();
     const classRef = db.collection('classes').doc(classId);
 
     const classDoc = await classRef.get();
 
     if (!classDoc.exists) {
-      return res.status(404).json({ error: 'Membership not found' });
+      return res.status(404).json({ error: 'Class not found' });
     }
 
     const classData = classDoc.data();
-    const gymId = classData.gymId;
 
-    // Elimina la membresía de la colección "memberships"
     await classRef.delete();
 
     if (gymId) {
-      // Si la membresía está asociada a un gimnasio, también elimínala de la colección "memberships" del gimnasio
-
-      // Actualiza el número secuencial en "metadata" del gimnasio si corresponde
       const metadataRef = db.collection('gyms').doc(gymId);
       const metadataDoc = await metadataRef.get();
 
@@ -443,9 +453,11 @@ const deleteClass = async (req, res) => {
       }
     }
 
-    res.status(204).send(); // Respuesta exitosa sin contenido
+    await logMovement(profileId, gymId, 'classes', 'delete', [classId]);
+
+    res.status(204).send();
   } catch (error) {
-    console.error('Error deleting membership:', error);
+    console.error('Error deleting class:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 };
@@ -453,25 +465,21 @@ const deleteClass = async (req, res) => {
 const deletePrimaryClass = async (req, res) => {
   try {
     const classId = req.params.classId;
+    const { gymId, profileId } = req.body;
     const db = admin.firestore();
     const classRef = db.collection('primaryClasses').doc(classId);
 
     const classDoc = await classRef.get();
 
     if (!classDoc.exists) {
-      return res.status(404).json({ error: 'Membership not found' });
+      return res.status(404).json({ error: 'Clase no encontrada' });
     }
 
-    const classData = classDoc.data();
-    const gymId = classData.gymId;
-
-    // Elimina la membresía de la colección "memberships"
+    // Elimina la clase de la colección "primaryClasses"
     await classRef.delete();
 
     if (gymId) {
-      // Si la membresía está asociada a un gimnasio, también elimínala de la colección "memberships" del gimnasio
-
-      // Actualiza el número secuencial en "metadata" del gimnasio si corresponde
+      // Si la clase está asociada a un gimnasio, actualiza el número de clases primarias en el documento del gimnasio
       const metadataRef = db.collection('gyms').doc(gymId);
       const metadataDoc = await metadataRef.get();
 
@@ -483,40 +491,164 @@ const deletePrimaryClass = async (req, res) => {
       }
     }
 
+    // Registrar el movimiento
+    await logMovement(
+      profileId, // ID del perfil que realiza la acción
+      gymId, // ID del gimnasio
+      'primaryClass', // Sección afectada
+      'delete', // Acción realizada
+      [classId], // Clases afectadas (en este caso, una sola clase)
+      [] // Perfiles afectados (vacío porque no se afectan perfiles directamente)
+    );
+
     res.status(204).send(); // Respuesta exitosa sin contenido
   } catch (error) {
-    console.error('Error deleting membership:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error('Error al eliminar la clase primaria:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
   }
 };
 
 const updateClass = async (req, res) => {
   try {
-    const { classId, formData } = req.body;
+    const { classId, formData, gymId, profileId } = req.body;
 
-    const profileRef = db.collection('classes').doc(classId);
+    // Verificar que gymId y profileId están presentes
+    if (!gymId || !profileId) {
+      return res
+        .status(400)
+        .json({ message: 'gymId and profileId are required' });
+    }
 
-    // Actualiza el documento con los datos proporcionados en formData
-    await profileRef.update(formData);
+    const classRef = db.collection('classes').doc(classId);
 
-    res.json({ message: 'Profile record updated successfully' });
+    // Actualizar el documento con los datos proporcionados en formData
+    await classRef.update(formData);
+
+    // Obtener el documento actualizado
+    const updatedClass = await classRef.get();
+
+    // Registrar el movimiento de actualización
+    await logMovement(profileId, gymId, 'classes', 'update', [classId]);
+
+    // Devolver la clase actualizada como respuesta
+    res.json({
+      message: 'Class record updated successfully',
+      class: updatedClass.data(), // Enviar los datos de la clase actualizada
+    });
   } catch (error) {
+    console.error('Error updating class:', error.message);
+    res.status(400).send(error.message);
+  }
+};
+
+const updateAllClasses = async (req, res) => {
+  try {
+    const { personalClassId, formData, gymId, profileId } = req.body;
+    const currentDate = new Date().toISOString(); // Obtener la fecha actual en formato ISO
+
+    // Verificar que gymId y profileId están presentes
+    if (!gymId || !profileId) {
+      return res
+        .status(400)
+        .json({ message: 'gymId and profileId are required' });
+    }
+
+    // Crear una copia de formData excluyendo eventDate, weekDays y selectedWeekDays
+    const { eventDate, weekDays, selectedWeekDays, ...filteredFormData } =
+      formData;
+
+    // Buscar la clase con el personalClassId y una fecha futura o actual
+    const classSnapshot = await db
+      .collection('classes')
+      .where('personalClassId', '==', personalClassId)
+      .where('eventDate', '>=', currentDate)
+      .get();
+
+    if (classSnapshot.empty) {
+      return res.status(404).json({
+        message: 'No classes to update from the current day onward',
+      });
+    }
+
+    // Almacenar las clases antes de actualizarlas
+    const updatedClassesBefore = [];
+    const updatedClassesAfter = [];
+
+    // Actualizar todas las clases encontradas
+    const batch = db.batch();
+
+    classSnapshot.forEach((classDoc) => {
+      const classRef = classDoc.ref;
+      updatedClassesBefore.push({ id: classDoc.id, ...classDoc.data() }); // Almacena los datos antes de la actualización
+      batch.update(classRef, filteredFormData);
+    });
+
+    await batch.commit();
+
+    const updatedClassSnapshot = await db
+      .collection('classes')
+      .where('personalClassId', '==', personalClassId)
+      .where('eventDate', '>=', currentDate)
+      .get();
+
+    updatedClassSnapshot.forEach((classDoc) => {
+      updatedClassesAfter.push({ id: classDoc.id, ...classDoc.data() });
+    });
+
+    const updatedClassIds = updatedClassesAfter.map((c) => c.id);
+    await logMovement(
+      profileId,
+      gymId,
+      'classes',
+      'updateAllClasses',
+      updatedClassIds
+    );
+
+    res.json({
+      message: 'Class(es) updated successfully',
+      classes: updatedClassesAfter,
+    });
+  } catch (error) {
+    console.error('Error updating classes:', error.message);
     res.status(400).send(error.message);
   }
 };
 
 const updatePrimaryClasses = async (req, res) => {
   try {
-    const { classId, formData } = req.body;
+    const { classId, formData, profileId } = req.body; // Asegúrate de obtener el profileId desde el cuerpo de la solicitud
 
-    const profileRef = db.collection('primaryClasses').doc(classId);
+    // Verificar si todos los campos necesarios están presentes
+    if (!classId || !formData || !profileId) {
+      return res.status(400).json({ message: 'Faltan campos requeridos' });
+    }
+
+    // Obtén una referencia al documento de la clase por ID
+    const classDocRef = db.collection('primaryClasses').doc(classId);
+
+    // Verifica si la clase existe
+    const classDoc = await classDocRef.get();
+    if (!classDoc.exists) {
+      return res.status(404).json({ message: 'Clase no encontrada' });
+    }
 
     // Actualiza el documento con los datos proporcionados en formData
-    await profileRef.update(formData);
+    await classDocRef.update(formData);
 
-    res.json({ message: 'Profile record updated successfully' });
+    // Registrar el movimiento
+    await logMovement(
+      profileId, // ID del perfil que realiza la acción
+      classDoc.data().gymId, // ID del gimnasio (debe estar en los datos de la clase)
+      'primaryClass', // Sección afectada
+      'update', // Acción realizada
+      [classId], // Clases afectadas (en este caso, una sola clase)
+      [] // Perfiles afectados (vacío porque no se afectan perfiles directamente)
+    );
+
+    res.status(200).json({ message: 'Profile record updated successfully' });
   } catch (error) {
-    res.status(400).send(error.message);
+    console.error('Error updating primary class:', error);
+    res.status(500).json({ message: 'Error interno del servidor' });
   }
 };
 
@@ -544,27 +676,25 @@ const addParticipants = async (req, res) => {
   try {
     const participants = req.body.memberForm; // Extraer los participantes de req.body.memberForm
     const classId = req.body.classId;
+    const gymId = req.body.gymId; // Extraer gymId del cuerpo de la solicitud
+    const profileId = req.body.profileId; // Extraer profileId del cuerpo de la solicitud
 
-    const memberForm = participants[participants.length - 1];
-    const qrData = `${memberForm.profileId},${classId}`;
+    // Asegúrate de que participants no esté vacío
+    if (!participants || participants.length === 0) {
+      return res.status(400).json({ message: 'No participants provided' });
+    }
 
-    const qrCode = await generateQRCode(qrData);
-    const participant = {
-      ...memberForm,
-      attendance: false,
-      qrCode: qrCode,
-    };
+    // Extraer todos los profileId de los participantes
+    const affectedProfiles = participants.map(
+      (participant) => participant.profileId
+    );
 
     // Obtener la referencia a la colección de clases
     const classesCollection = db.collection('classes');
-
-    // Obtener la referencia al documento de la clase por ID
     const classDocRef = classesCollection.doc(classId);
 
     // Verificar si la clase existe
     const classDoc = await classDocRef.get();
-
-    // Si la clase no existe, crear un nuevo documento con el campo currentClassParticipants inicializado en 0
     if (!classDoc.exists) {
       await classDocRef.set({
         currentClassParticipants: 0,
@@ -574,81 +704,45 @@ const addParticipants = async (req, res) => {
     // Obtener la referencia a la subcolección de participantes
     const participantsCollection = classDocRef.collection('participants');
 
-    // Añadir el nuevo participante a la subcolección usando profileId como ID del documento
-    await participantsCollection.doc(memberForm.profileId).set(participant);
+    // Generar QR y agregar cada participante
+    for (const memberForm of participants) {
+      const qrData = `${memberForm.profileId},${classId}`;
+      const qrCode = await generateQRCode(qrData);
+      const participant = {
+        ...memberForm,
+        attendance: false,
+        qrCode: qrCode,
+      };
+
+      // Añadir el nuevo participante a la subcolección usando profileId como ID del documento
+      await participantsCollection.doc(memberForm.profileId).set(participant);
+    }
 
     // Actualizar el campo de participantes actual
     const currentParticipantsCount = (await participantsCollection.get()).size;
-
     await classDocRef.update({
       currentClassParticipants: currentParticipantsCount,
     });
 
+    // Registrar el movimiento con las clases y perfiles afectados
+    await logMovement(
+      profileId,
+      gymId,
+      'classes',
+      'addMember',
+      [classId],
+      affectedProfiles
+    );
+
     return res.status(200).json({
-      message: 'Participante agregado con éxito',
+      message: 'Participantes agregados con éxito',
       currentClassParticipants: currentParticipantsCount,
     });
   } catch (error) {
-    console.error('Error al agregar participante y generar QR:', error);
+    console.error('Error al agregar participantes y generar QR:', error);
     return res.status(500).json({ message: 'Error interno del servidor' });
   }
 };
-
-// const addParticipants = async (req, res) => {
-//   try {
-//     const participants = req.body.memberForm; // Extraer el participante de req.body.memberForm
-//     const classId = req.body.classId;
-
-//     const memberForm = participants[participants.length - 1];
-//     const qrData = `${memberForm.profileId},${classId}`;
-
-//     const qrCode = await generateQRCode(qrData);
-//     const participant = {
-//       ...memberForm,
-//       attendance: false,
-//       qrCode: qrCode,
-//     };
-
-//     // Obtener la referencia a la colección de clases
-//     const classesCollection = db.collection('classes');
-
-//     // Obtener la referencia al documento de la clase por ID
-//     const classDocRef = classesCollection.doc(classId);
-
-//     // Verificar si la clase existe
-//     const classDoc = await classDocRef.get();
-
-//     // Si la clase no existe, crear un nuevo documento con el campo participants inicializado en 1
-//     if (!classDoc.exists) {
-//       await classDocRef.set({
-//         participants: [participant],
-//         currentClassParticipants: 1,
-//       });
-
-//       return res.status(200).json({
-//         message: 'Participante agregado con éxito',
-//         currentClassParticipants: 1,
-//       });
-//     }
-
-//     // Obtener el campo de participantes actual
-//     const currentParticipants = classDoc.data().participants || [];
-
-//     // Actualizar el campo de participantes utilizando arrayUnion
-//     await classDocRef.update({
-//       participants: admin.firestore.FieldValue.arrayUnion(participant),
-//       currentClassParticipants: currentParticipants.length + 1,
-//     });
-
-//     return res.status(200).json({
-//       message: 'Participante agregado con éxito',
-//       currentClassParticipants: currentParticipants.length + 1,
-//     });
-//   } catch (error) {
-//     console.error('Error al agregar participante y generar QR:', error);
-//     return res.status(500).json({ message: 'Error interno del servidor' });
-//   }
-// };
 
 // Función para generar el código QR y retornarlo como base64
 const generateQRCode = async (qrData) => {
@@ -662,57 +756,15 @@ const generateQRCode = async (qrData) => {
   }
 };
 
-// const addParticipants = async (req, res) => {
-//   try {
-//     const participants = req.body.memberForm; // Extraer la lista de participantes de req.body.memberForm
-//     const classId = req.body.classId;
-
-//     // Obtén la referencia a la colección de clases
-//     const classesCollection = db.collection('classes');
-
-//     // Obtén la referencia al documento de la clase por ID
-//     const classDocRef = classesCollection.doc(classId);
-
-//     // Verifica si la clase existe
-//     const classDoc = await classDocRef.get();
-
-//     // Si la clase no existe, crea un nuevo documento con el campo participants inicializado en 1
-//     if (!classDoc.exists) {
-//       await classDocRef.set({
-//         participants: participants,
-//         currentClassParticipants: 1,
-//       });
-
-//       return res.status(200).json({
-//         message: 'Participantes agregados con éxito',
-//         currentClassParticipants: 1,
-//       });
-//     }
-
-//     // Obtiene el campo de participantes actual
-//     const currentParticipants = classDoc.data().participants || [];
-
-//     // Actualiza el campo de participantes utilizando arrayUnion
-//     await classDocRef.update({
-//       participants: admin.firestore.FieldValue.arrayUnion(...participants),
-//       currentClassParticipants: currentParticipants.length + 1,
-//     });
-
-//     return res.status(200).json({
-//       message: 'Participantes agregados con éxito',
-//       currentClassParticipants: currentParticipants.length + 1,
-//     });
-//   } catch (error) {
-//     console.error('Error al agregar participantes:', error);
-//     return res.status(500).json({ message: 'Error interno del servidor' });
-//   }
-// };
-
 const addUnknownParticipants = async (req, res) => {
   try {
     const participants = req.body.memberForm; // Extraer la lista de participantes de req.body.memberForm
     const profileId = req.body.profileId;
-    const participantAdded = req.body.memberForm.filter(
+    const classId = req.body.classId;
+    const gymId = req.body.gymId; // Extraer gymId del cuerpo de la solicitud
+
+    // Filtrar los participantes agregados con el profileId proporcionado
+    const participantAdded = participants.filter(
       (participant) => participant.profileId === profileId
     );
 
@@ -723,25 +775,23 @@ const addUnknownParticipants = async (req, res) => {
       });
     }
 
-    const deductedAtBooking =
-      participantAdded[0].selectedPackage.deductedAtBooking;
-    const prepaymentType = participantAdded[0].selectedPackage.prepaymentType;
-    const currentCredit = participantAdded[0].currentCredit;
+    const { deductedAtBooking, prepaymentType, currentCredit } =
+      participantAdded[0].selectedPackage;
 
     if (currentCredit === 0) {
       return res.status(400).json({
-        message: 'This member does not have available credit',
+        message: 'Este miembro no tiene crédito disponible',
       });
     }
 
     if (prepaymentType !== 1 && prepaymentType !== 3) {
       return res.status(400).json({
-        message: "This member's package does not allow creating classes",
+        message: 'El paquete de este miembro no permite crear clases',
       });
     }
 
     if (deductedAtBooking) {
-      // Restar 1 crédito del currentCredit del memberForm
+      // Restar 1 crédito del currentCredit del miembro
       participantAdded[0].currentCredit--;
 
       // Actualizar el currentCredit en el perfil de la persona
@@ -751,17 +801,12 @@ const addUnknownParticipants = async (req, res) => {
       });
     }
 
-    const classId = req.body.classId;
-
     // Obtén la referencia a la colección de clases
     const classesCollection = db.collection('classes');
-
-    // Obtén la referencia al documento de la clase por ID
     const classDocRef = classesCollection.doc(classId);
 
     // Verifica si la clase existe
     const classDoc = await classDocRef.get();
-
     if (!classDoc.exists) {
       await classDocRef.set({
         currentUnknownClassParticipants: 0,
@@ -774,16 +819,22 @@ const addUnknownParticipants = async (req, res) => {
     );
     const batch = db.batch();
 
+    // Lista para almacenar los perfiles afectados
+    const affectedProfiles = [];
+
     participants.forEach((participant) => {
       const participantDocRef = unknownParticipantsCollection.doc(
         participant.profileId
-      ); // Usa profileId como ID del documento
+      );
       batch.set(participantDocRef, participant);
+      if (!affectedProfiles.includes(participant.profileId)) {
+        affectedProfiles.push(participant.profileId);
+      }
     });
 
     await batch.commit();
 
-    // Obtener el número de participantes actualizados
+    // Obtener el número de participantes actuales
     const updatedParticipantsSnapshot =
       await unknownParticipantsCollection.get();
     const currentUnknownClassParticipants = updatedParticipantsSnapshot.size;
@@ -791,6 +842,16 @@ const addUnknownParticipants = async (req, res) => {
     await classDocRef.update({
       currentUnknownClassParticipants: currentUnknownClassParticipants,
     });
+
+    // Registrar el movimiento
+    await logMovement(
+      profileId,
+      gymId,
+      'classes',
+      'addNonMember',
+      [classId], // Asegúrate de que classId esté incluido en affectedClasses
+      affectedProfiles // Lista de perfiles afectados
+    );
 
     return res.status(200).json({
       message: 'Participantes agregados con éxito',
@@ -806,7 +867,12 @@ const addUnknownParticipants = async (req, res) => {
 
 const removeParticipant = async (req, res) => {
   try {
-    const { deletedProfileId, classId } = req.body;
+    const { deletedProfileId, classId, profileId, gymId } = req.body;
+
+    // Verificar si todos los campos necesarios están presentes
+    if (!deletedProfileId || !classId || !profileId || !gymId) {
+      return res.status(400).json({ message: 'Faltan campos requeridos' });
+    }
 
     // Obtén una referencia a la colección de clases
     const classesCollection = db.collection('classes');
@@ -844,6 +910,16 @@ const removeParticipant = async (req, res) => {
       currentClassParticipants: currentClassParticipants,
     });
 
+    // Registrar el movimiento
+    await logMovement(
+      profileId, // ID del perfil que está realizando la acción
+      gymId, // ID del gimnasio
+      'classes', // Sección afectada
+      'removeMember', // Acción realizada
+      [classId], // Clases afectadas
+      [deletedProfileId] // Perfiles afectados
+    );
+
     // Devuelve una respuesta exitosa junto con el nuevo número de participantes
     res.status(200).json({
       message: 'Participante eliminado con éxito',
@@ -857,7 +933,12 @@ const removeParticipant = async (req, res) => {
 
 const removeUnknownParticipant = async (req, res) => {
   try {
-    const { deletedProfileId, classId } = req.body;
+    const { deletedProfileId, classId, profileId, gymId } = req.body;
+
+    // Verificar si todos los campos necesarios están presentes
+    if (!deletedProfileId || !classId || !profileId || !gymId) {
+      return res.status(400).json({ message: 'Faltan campos requeridos' });
+    }
 
     // Obtén una referencia a la colección de clases
     const classesCollection = db.collection('classes');
@@ -868,7 +949,7 @@ const removeUnknownParticipant = async (req, res) => {
     // Verifica si la clase existe
     const classDoc = await classDocRef.get();
     if (!classDoc.exists) {
-      return res.status(404).json({ message: 'Class not found' });
+      return res.status(404).json({ message: 'Clase no encontrada' });
     }
 
     // Obtén la subcolección de participantes desconocidos
@@ -882,13 +963,13 @@ const removeUnknownParticipant = async (req, res) => {
     const participantDoc = await participantDocRef.get();
 
     if (!participantDoc.exists) {
-      return res.status(404).json({ message: 'Participant not found' });
+      return res.status(404).json({ message: 'Participante no encontrado' });
     }
 
     // Elimina el documento del participante
     await participantDocRef.delete();
 
-    // Obtiene la cantidad actualizada de participantes
+    // Obtén la cantidad actualizada de participantes
     const updatedParticipantsSnapshot =
       await unknownParticipantsCollection.get();
     const currentUnknownClassParticipants = updatedParticipantsSnapshot.size;
@@ -898,20 +979,35 @@ const removeUnknownParticipant = async (req, res) => {
       currentUnknownClassParticipants: currentUnknownClassParticipants,
     });
 
+    // Registrar el movimiento
+    await logMovement(
+      profileId, // ID del perfil que realiza la acción
+      gymId, // ID del gimnasio
+      'classes', // Sección afectada
+      'removeNonMember', // Acción realizada
+      [classId], // Clases afectadas
+      [deletedProfileId] // Perfiles afectados
+    );
+
     // Devuelve una respuesta exitosa junto con el nuevo número de participantes
     res.status(200).json({
-      message: 'Participant removed successfully',
+      message: 'Participante eliminado con éxito',
       currentUnknownClassParticipants: currentUnknownClassParticipants,
     });
   } catch (error) {
-    console.error('Error removing participant:', error);
-    res.status(500).json({ message: 'Internal server error' });
+    console.error('Error al eliminar participante:', error);
+    res.status(500).json({ message: 'Error interno del servidor' });
   }
 };
 
 const cancelClass = async (req, res) => {
   try {
-    const { classId, eventStartDate } = req.body;
+    const { classId, eventStartDate, profileId, gymId } = req.body;
+
+    // Verificar si todos los campos necesarios están presentes
+    if (!classId || !eventStartDate || !profileId || !gymId) {
+      return res.status(400).json({ message: 'Faltan campos requeridos' });
+    }
 
     // Obtén una referencia a la colección de clases
     const classesCollection = db.collection('classes');
@@ -933,6 +1029,9 @@ const cancelClass = async (req, res) => {
 
     // Actualiza el campo classesCancelled en el documento de la clase
     await classDocRef.update({ classesCancelled: classesCancelled });
+
+    // Registrar el movimiento
+    await logMovement(profileId, gymId, 'classes', 'cancel', [classId], []);
 
     return res.status(200).json({ message: 'Clase cancelada con éxito' });
   } catch (error) {
@@ -1047,52 +1146,6 @@ const getWeekClasses = async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 };
-
-// const getWeekClasses = async (req, res) => {
-//   try {
-//     const gymId = req.params.gymId;
-//     const filterDate = req.query.initialDate;
-
-//     // Convertir filterDate a un objeto Moment
-//     const initialDate = moment(filterDate);
-
-//     // Calcular la fecha de inicio de la semana (lunes a las 12 AM)
-//     let startOfWeek = initialDate
-//       .clone()
-//       .startOf('week')
-//       .add(1, 'days')
-//       .startOf('day');
-
-//     // Calcular la fecha de finalización de la semana (domingo a las 11:59 PM)
-//     let endOfWeek = initialDate.clone().endOf('week').endOf('day');
-
-//     // Ajustar el inicio de la semana a partir del día actual si no es lunes
-//     if (initialDate.isAfter(startOfWeek)) {
-//       startOfWeek = initialDate.clone().startOf('day');
-//     }
-
-//     const classesRef = admin.firestore().collection('classes');
-
-//     // Consultar las clases filtradas por gymId y eventDate
-//     const snapshot = await classesRef
-//       .where('gymId', '==', gymId)
-//       .where('eventDate', '>=', startOfWeek.format('YYYY-MM-DD'))
-//       .where('eventDate', '<=', endOfWeek.format('YYYY-MM-DD'))
-//       .get();
-
-//     // Extraer los datos de los documentos encontrados
-//     const classesWithinWeek = [];
-//     snapshot.forEach((doc) => {
-//       classesWithinWeek.push(doc.data());
-//     });
-
-//     // Devolver las clases encontradas en la respuesta
-//     res.status(200).json(classesWithinWeek);
-//   } catch (error) {
-//     console.error(error);
-//     res.status(500).json({ error: 'Internal server error' });
-//   }
-// };
 
 const formatEventDateTime = (eventDate, startDate, endDate) => {
   if (!eventDate || !startDate || !endDate) {
@@ -1441,6 +1494,12 @@ const createPrimaryClasses = async (req, res) => {
   try {
     const body = req.body;
     const gymId = req.query.gymId;
+    const profileId = body.profileId; // Asegúrate de obtener el profileId desde el cuerpo de la solicitud
+
+    // Verificar si todos los campos necesarios están presentes
+    if (!gymId || !profileId) {
+      return res.status(400).json({ message: 'Faltan campos requeridos' });
+    }
 
     // Generar el número secuencial para la clase primaria
     const gymClassSerialNumber = await generatePrimarySequentialNumber(gymId);
@@ -1466,8 +1525,8 @@ const createPrimaryClasses = async (req, res) => {
     };
 
     // Guardar la clase en la base de datos
-    const profilesCollection = db.collection('primaryClasses');
-    const newClassRef = profilesCollection.doc(classId);
+    const primaryClassesCollection = db.collection('primaryClasses');
+    const newClassRef = primaryClassesCollection.doc(classId);
     await newClassRef.set(classObj);
 
     // Actualizar el número secuencial en la colección de gimnasios
@@ -1475,6 +1534,16 @@ const createPrimaryClasses = async (req, res) => {
     await gymsCollection.doc(gymId).update({
       primaryClassLastSerialNumber: gymClassSerialNumber,
     });
+
+    // Registrar el movimiento
+    await logMovement(
+      profileId, // ID del perfil que realiza la acción
+      gymId, // ID del gimnasio
+      'primaryClass', // Sección afectada
+      'create', // Acción realizada
+      [classId], // Clases afectadas (en este caso, una sola clase)
+      [] // Perfiles afectados (vacío porque no se afectan perfiles directamente)
+    );
 
     res.status(201).json({
       message: 'Primary class created successfully',
@@ -1553,15 +1622,15 @@ const getAllprimaryClasses = async (req, res) => {
 };
 
 const changeMemberAttendanceStatus = async (req, res) => {
-  const { profileId, classId } = req.body;
+  const { memberId, classId, gymId, profileId } = req.body;
 
   try {
     // Referencias a las colecciones
-    const profilesRef = db.collection('profiles').doc(profileId);
+    const profilesRef = db.collection('profiles').doc(memberId); // Perfil del cliente
     const classRef = db.collection('classes').doc(classId);
     const attendanceHistoryRef = db.collection('attendanceHistory');
 
-    // Obtener el perfil
+    // Obtener el perfil del cliente
     const profileDoc = await profilesRef.get();
     if (!profileDoc.exists) {
       return res.status(404).json({ message: 'Profile not found.' });
@@ -1569,7 +1638,6 @@ const changeMemberAttendanceStatus = async (req, res) => {
 
     const profileData = profileDoc.data();
     const cardSerialNumber = profileData.cardSerialNumber;
-    const gymId = profileData.gymId;
     const profileName = profileData.profileName;
     const profileLastname = profileData.profileLastname;
 
@@ -1586,7 +1654,7 @@ const changeMemberAttendanceStatus = async (req, res) => {
 
     // Buscar el participante en la subcolección
     const participantQuery = await participantsCollectionRef
-      .where('profileId', '==', profileId)
+      .where('profileId', '==', memberId)
       .get();
 
     if (participantQuery.empty) {
@@ -1604,7 +1672,7 @@ const changeMemberAttendanceStatus = async (req, res) => {
       await attendanceHistoryRef.add({
         gymId: gymId,
         activityId: classId,
-        profileId: profileId,
+        profileId: memberId, // ID del cliente
         cardSerialNumber: cardSerialNumber,
         attendanceDate: new Date(),
         role: 'member',
@@ -1612,6 +1680,16 @@ const changeMemberAttendanceStatus = async (req, res) => {
 
       // Actualizar el estado de asistencia a true en la subcolección
       await participantDoc.ref.update({ attendance: true });
+
+      // Registrar el movimiento
+      await logMovement(
+        profileId,
+        gymId,
+        'classAttendance',
+        'statusModifiedToTrue',
+        [classId],
+        [memberId]
+      );
 
       // Responder con los datos actualizados
       res.status(200).json({
@@ -1631,7 +1709,7 @@ const changeMemberAttendanceStatus = async (req, res) => {
       const historySnapshot = await attendanceHistoryRef
         .where('gymId', '==', gymId)
         .where('activityId', '==', classId)
-        .where('profileId', '==', profileId)
+        .where('profileId', '==', memberId) // ID del cliente
         .get();
 
       const batch = db.batch();
@@ -1639,6 +1717,16 @@ const changeMemberAttendanceStatus = async (req, res) => {
         batch.delete(doc.ref);
       });
       await batch.commit();
+
+      // Registrar el movimiento
+      await logMovement(
+        profileId,
+        gymId,
+        'classAttendance',
+        'statusModifiedToFalse',
+        [classId],
+        [memberId]
+      );
 
       // Responder con los datos actualizados
       res.status(200).json({
@@ -1669,6 +1757,7 @@ module.exports = {
   deletePrimaryClass,
   deleteAllClasses,
   updateClass,
+  updateAllClasses,
   updatePrimaryClasses,
   generateClassReport,
   getTrainers,

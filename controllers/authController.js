@@ -1,6 +1,5 @@
 const express = require('express');
 const app = express();
-const Profile = require('../models/profile');
 const { db } = require('../firebase');
 const bodyParser = require('body-parser');
 const jwt = require('jsonwebtoken');
@@ -8,9 +7,17 @@ app.use(bodyParser.json());
 const crypto = require('crypto');
 const nodemailer = require('nodemailer');
 const admin = require('firebase-admin');
-const { profile } = require('console');
+const { SESClient, SendEmailCommand } = require('@aws-sdk/client-ses');
+require('dotenv').config();
 
-const secretKey = 'tu_secreto_secreto';
+const sesClient = new SESClient({
+  region: process.env.AWS_REGION,
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+  },
+});
+
 const allowedIPs = ['::1', '10.0.0.1', '172.16.0.1'];
 
 const transporter = nodemailer.createTransport({
@@ -182,19 +189,6 @@ const getlogIn = async (req, res) => {
         profileData.role.length === 1 &&
         profileData.role[0] === 'trainer')
     ) {
-      // const currentDate = new Date();
-      // const passwordCreationDate = new Date(profileData.passwordCreationDate);
-      // const daysDifference = Math.floor(
-      //   (currentDate - passwordCreationDate) / (1000 * 60 * 60 * 24)
-      // );
-
-      // If less than 1 minute has passed and it's an administrator, show an error
-      // if (daysDifference > 30) {
-      //   return res.status(401).json({
-      //     changepassword: true,
-      //     error: 'You must change your password before logging in.',
-      //   });
-      // } else {
       const verificationCode = generateVerificationCode();
 
       // Envía el código de verificación por correo electrónico
@@ -381,21 +375,29 @@ const generateVerificationEmailTemplate = (verificationCode) => {
 const sendVerificationCodeByEmail = async (email, verificationCode) => {
   const renderedTemplate = generateVerificationEmailTemplate(verificationCode);
 
-  const mailOptions = {
-    from: 'NeoApp - Verification Code 🔐" <goneoapp@gmail.com>',
-    to: email,
-    subject: 'Verify your email address',
-    html: renderedTemplate,
-    text: `Please use the following security code to verify your email address on the app: ${verificationCode}`,
+  const params = {
+    Source: 'NeoApp - Verification Code 🔐 <no-reply@neoappgym.com>', // Dirección de remitente verificada en SES
+    Destination: {
+      ToAddresses: [email], // Dirección del destinatario
+    },
+    Message: {
+      Subject: { Data: 'Verify your email address' }, // Asunto del correo
+      Body: {
+        Html: {
+          Data: renderedTemplate, // Cuerpo del correo en HTML
+        },
+        Text: {
+          Data: `Please use the following security code to verify your email address on the app: ${verificationCode}`, // Cuerpo del correo en texto plano
+        },
+      },
+    },
   };
 
   try {
-    await transporter.sendMail(mailOptions);
+    const command = new SendEmailCommand(params);
+    const response = await sesClient.send(command);
   } catch (error) {
-    console.error(
-      'Error al enviar el código de verificación por correo electrónico:',
-      error
-    );
+    console.error('Error al enviar el correo con SES:', error);
     throw new Error(
       'No se pudo enviar el código de verificación por correo electrónico.'
     );

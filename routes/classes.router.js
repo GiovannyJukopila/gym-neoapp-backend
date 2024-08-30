@@ -12,6 +12,7 @@ const {
   createClass,
   createPrimaryClasses,
   updateClass,
+  updateAllClasses,
   updatePrimaryClasses,
   generateClassReport,
   deleteClass,
@@ -51,6 +52,8 @@ router.post('/createPrimaryClasses', verifyToken, createPrimaryClasses);
 
 router.post('/update', verifyToken, updateClass);
 
+router.post('/updateAllClasses', verifyToken, updateAllClasses);
+
 router.post('/updatePrimaryClasses', verifyToken, updatePrimaryClasses);
 
 router.post('/generateClassReport/:gymId', verifyToken, generateClassReport);
@@ -61,9 +64,9 @@ router.post('/removeParticipant', verifyToken, removeParticipant);
 
 router.post('/removeUnknownParticipant', verifyToken, removeUnknownParticipant);
 
-router.delete('/delete/:classId', verifyToken, deleteClass);
+router.post('/deletePrimaryClass/:classId', verifyToken, deletePrimaryClass);
 
-router.delete('/deletePrimaryClass/:classId', verifyToken, deletePrimaryClass);
+router.delete('/delete/:classId', verifyToken, deleteClass);
 
 router.delete(
   '/deleteAllClasses/:personalClassId',
