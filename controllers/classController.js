@@ -441,17 +441,17 @@ const deleteClass = async (req, res) => {
 
     await classRef.delete();
 
-    if (gymId) {
-      const metadataRef = db.collection('gyms').doc(gymId);
-      const metadataDoc = await metadataRef.get();
+    // if (gymId) {
+    //   const metadataRef = db.collection('gyms').doc(gymId);
+    //   const metadataDoc = await metadataRef.get();
 
-      if (metadataDoc.exists) {
-        const data = metadataDoc.data();
-        const gymClasses = data.gymClasses - 1;
+    //   if (metadataDoc.exists) {
+    //     const data = metadataDoc.data();
+    //     const gymClasses = data.gymClasses - 1;
 
-        await metadataRef.update({ gymClasses });
-      }
-    }
+    //     await metadataRef.update({ gymClasses });
+    //   }
+    // }
 
     await logMovement(profileId, gymId, 'classes', 'delete', [classId]);
 
