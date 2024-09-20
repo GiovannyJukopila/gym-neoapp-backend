@@ -8,6 +8,16 @@ const moment = require('moment');
 const QRCode = require('qrcode');
 const PDFDocument = require('pdfkit-table');
 const { format, parseISO } = require('date-fns');
+const { SESClient, SendEmailCommand } = require('@aws-sdk/client-ses');
+require('dotenv').config();
+
+const sesClient = new SESClient({
+  region: process.env.AWS_REGION,
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+  },
+});
 
 app.use(bodyParser.json());
 
@@ -53,6 +63,7 @@ const createClass = async (req, res) => {
             description: body.description,
             selectedWeekDays: [dayOfWeek],
             unknownClassCapacity: body?.unknownClassCapacity,
+            primaryClassId: body?.primaryClassSelected,
           };
 
           classes.push(classObj);
@@ -88,6 +99,7 @@ const createClass = async (req, res) => {
           description: body.description,
           selectedWeekDays: [expirationDayOfWeek],
           unknownClassCapacity: body?.unknownClassCapacity,
+          primaryClassId: body?.primaryClassSelected,
         };
         classes.push(expirationClassObj);
       }
@@ -139,6 +151,7 @@ const createClass = async (req, res) => {
           description: body.description,
           selectedWeekDays: [dayOfWeek],
           unknownClassCapacity: body?.unknownClassCapacity,
+          primaryClassId: body?.primaryClassSelected,
         };
 
         classes.push(classObj);
@@ -214,8 +227,6 @@ async function generateSequentialNumber(gymId) {
 const getAllClasses = async (req, res) => {
   try {
     const gymId = req.query.gymId;
-
-    // Continúa con tu lógica para obtener perfiles y realizar otras operaciones
     const startDate = req.query.startDate;
     const endDate = req.query.endDate;
 
@@ -232,6 +243,7 @@ const getAllClasses = async (req, res) => {
       const data = doc.data();
       const classId = doc.id;
 
+      // Obtener los participantes regulares
       const participantsSnapshot = await doc.ref
         .collection('participants')
         .select(
@@ -247,7 +259,7 @@ const getAllClasses = async (req, res) => {
         participantDoc.data()
       );
 
-      // Obtener participantes desconocidos
+      // Obtener los participantes desconocidos
       const unknownParticipantsSnapshot = await doc.ref
         .collection('unknownParticipants')
         .get();
@@ -255,6 +267,25 @@ const getAllClasses = async (req, res) => {
         (unknownParticipantDoc) => unknownParticipantDoc.data()
       );
 
+      // Obtener la lista de espera de miembros conocidos
+      const waitingListSnapshot = await doc.ref
+        .collection('waitingList')
+        .orderBy('position') // Ordenar por posición
+        .get();
+      const waitingList = waitingListSnapshot.docs.map((waitingDoc) =>
+        waitingDoc.data()
+      );
+
+      // Obtener la lista de espera de miembros desconocidos
+      const unknownWaitingListSnapshot = await doc.ref
+        .collection('unknownWaitingList')
+        .orderBy('position') // Ordenar por posición
+        .get();
+      const unknownWaitingList = unknownWaitingListSnapshot.docs.map(
+        (unknownWaitingDoc) => unknownWaitingDoc.data()
+      );
+
+      // Crear el objeto de clase con toda la información necesaria
       const membership = {
         id: classId,
         classId: data.classId,
@@ -275,20 +306,25 @@ const getAllClasses = async (req, res) => {
         expirationDate: data.expirationDate,
         participants: participants,
         currentClassParticipants: data.currentClassParticipants,
+        unknownParticipants: unknownParticipants,
+        currentUnknownClassParticipants: data.currentUnknownClassParticipants,
+        waitingList: waitingList, // Lista de espera de miembros conocidos
+        unknownWaitingList: unknownWaitingList, // Lista de espera de miembros desconocidos
+        attendance: data.attendance,
         classesCancelled: data.classesCancelled,
         personalClassId: data.personalClassId,
         unknownClassCapacity: data.unknownClassCapacity,
-        unknownParticipants: unknownParticipants,
-        currentUnknownClassParticipants: data.currentUnknownClassParticipants,
-        attendance: data.attendance,
+        primaryClassId: data?.primaryClassId,
       };
+
+      // Agregar la clase procesada al array
       classesArray.push(membership);
     }
 
-    // Envía la respuesta como una matriz de perfiles directamente
+    // Enviar la respuesta con la lista de clases y sus detalles
     res.status(200).json(classesArray);
   } catch (error) {
-    console.error('Error en getAllProfiles:', error);
+    console.error('Error en getAllClasses:', error);
     res.status(500).send(error);
   }
 };
@@ -440,18 +476,6 @@ const deleteClass = async (req, res) => {
     const classData = classDoc.data();
 
     await classRef.delete();
-
-    // if (gymId) {
-    //   const metadataRef = db.collection('gyms').doc(gymId);
-    //   const metadataDoc = await metadataRef.get();
-
-    //   if (metadataDoc.exists) {
-    //     const data = metadataDoc.data();
-    //     const gymClasses = data.gymClasses - 1;
-
-    //     await metadataRef.update({ gymClasses });
-    //   }
-    // }
 
     await logMovement(profileId, gymId, 'classes', 'delete', [classId]);
 
@@ -1039,6 +1063,7 @@ const cancelClass = async (req, res) => {
     res.status(500).json({ message: 'Error interno del servidor' });
   }
 };
+
 const getTodaysClasses = async (req, res) => {
   try {
     const gymId = req.params.gymId;
@@ -1524,6 +1549,40 @@ const createPrimaryClasses = async (req, res) => {
       unknownClassCapacity: body?.unknownClassCapacity,
     };
 
+    if (body.memberRestrictions) {
+      classObj.memberRestrictions = {
+        restrictions: body.memberRestrictions.restrictions || false,
+        maxCancellationsPer30Days:
+          body.memberRestrictions.maxCancellationsPer30Days || null,
+        maxNoShowPer30Days: body.memberRestrictions.maxNoShowPer30Days || null,
+        penaltyType: body.memberRestrictions.penaltyType || null,
+        monetaryAmount: body.memberRestrictions.monetaryAmount || null,
+        timeRestrictionDays:
+          body.memberRestrictions.timeRestrictionDays || null,
+        penaltyWaiveUnit: body.memberRestrictions.penaltyWaiveUnit || 'days',
+        penaltyWaiveDays: body.memberRestrictions.penaltyWaiveDays || 1,
+        penaltyWaiveHours: body.memberRestrictions.penaltyWaiveHours || null,
+      };
+    }
+
+    if (body.nonMemberRestrictions) {
+      classObj.nonMemberRestrictions = {
+        restrictions: body.nonMemberRestrictions.restrictions || false,
+        maxNonMembersCancellations:
+          body.nonMemberRestrictions.maxNonMembersCancellations || null,
+        nonMemberCreditsPenalty:
+          body.nonMemberRestrictions.nonMemberCreditsPenalty || null,
+        maxNonMembersNoShows:
+          body.nonMemberRestrictions.maxNonMembersNoShows || null,
+        penaltyNonMemberWaiveUnit:
+          body.nonMemberRestrictions.penaltyNonMemberWaiveUnit || 'days',
+        penaltyNonMemberWaiveDays:
+          body.nonMemberRestrictions.penaltyNonMemberWaiveDays || 1,
+        penaltyNonMemberWaiveHours:
+          body.nonMemberRestrictions.penaltyNonMemberWaiveHours || null,
+      };
+    }
+
     // Guardar la clase en la base de datos
     const primaryClassesCollection = db.collection('primaryClasses');
     const newClassRef = primaryClassesCollection.doc(classId);
@@ -1610,6 +1669,39 @@ const getAllprimaryClasses = async (req, res) => {
         weekDays: data.weekDays,
         unknownClassCapacity: data?.unknownClassCapacity,
       };
+      if (data.memberRestrictions?.restrictions) {
+        membership.memberRestrictions = {
+          restrictions: data.memberRestrictions.restrictions,
+          maxCancellationsPer30Days:
+            data.memberRestrictions.maxCancellationsPer30Days,
+          maxNoShowPer30Days: data.memberRestrictions.maxNoShowPer30Days,
+          penaltyType: data.memberRestrictions.penaltyType,
+          monetaryAmount: data.memberRestrictions.monetaryAmount,
+          timeRestrictionDays: data.memberRestrictions.timeRestrictionDays,
+          penaltyWaiveUnit: data.memberRestrictions.penaltyWaiveUnit,
+          penaltyWaiveDays: data.memberRestrictions.penaltyWaiveDays,
+          penaltyWaiveHours: data.memberRestrictions.penaltyWaiveHours,
+        };
+      }
+
+      // Verificar restricciones de no miembros y añadirlas solo si son verdaderas
+      if (data.nonMemberRestrictions?.restrictions) {
+        membership.nonMemberRestrictions = {
+          restrictions: data.nonMemberRestrictions.restrictions,
+          maxNonMembersCancellations:
+            data.nonMemberRestrictions.maxNonMembersCancellations,
+          nonMemberCreditsPenalty:
+            data.nonMemberRestrictions.nonMemberCreditsPenalty,
+          maxNonMembersNoShows: data.nonMemberRestrictions.maxNonMembersNoShows,
+          penaltyNonMemberWaiveUnit:
+            data.nonMemberRestrictions.penaltyNonMemberWaiveUnit,
+          penaltyNonMemberWaiveDays:
+            data.nonMemberRestrictions.penaltyNonMemberWaiveDays,
+          penaltyNonMemberWaiveHours:
+            data.nonMemberRestrictions.penaltyNonMemberWaiveHours,
+        };
+      }
+
       classesArray.push(membership);
     });
 
@@ -1747,6 +1839,352 @@ const changeMemberAttendanceStatus = async (req, res) => {
   }
 };
 
+const updateUserPositions = async (req, res) => {
+  try {
+    const { users, classId, currentListType, gymId, profileId } = req.body;
+
+    // Definir qué subcolección actualizar según currentListType
+    const listField =
+      currentListType === 'waitingNonMembers'
+        ? 'unknownWaitingList'
+        : 'waitingList';
+
+    // Verificar que classId esté presente
+    if (!classId) {
+      return res.status(400).send({ message: 'classId es requerido.' });
+    }
+
+    // Obtener el documento de la clase
+    const classDocRef = db.collection('classes').doc(classId);
+    const classDoc = await classDocRef.get();
+
+    if (!classDoc.exists) {
+      return res.status(404).send({ message: 'Clase no encontrada.' });
+    }
+
+    // Obtener la referencia de la subcolección
+    const listRef = classDocRef.collection(listField);
+
+    // Verificar que users esté presente y sea un arreglo
+    if (!Array.isArray(users)) {
+      return res.status(400).send({ message: 'users debe ser un arreglo.' });
+    }
+
+    // Crear un batch para las actualizaciones
+    const batch = db.batch();
+    const updatedProfiles = [];
+
+    // Iterar sobre los usuarios para actualizar sus posiciones
+    for (const user of users) {
+      // Verificar que user.profileId esté presente
+      if (!user.profileId) {
+        continue; // O puedes enviar un error si prefieres
+      }
+
+      // Buscar el documento del usuario en la subcolección
+      const userDocRef = listRef.doc(user.profileId);
+      const userDoc = await userDocRef.get();
+
+      if (userDoc.exists) {
+        // Actualizar la posición del usuario
+        batch.update(userDocRef, { position: user.position });
+        updatedProfiles.push(user.profileId); // Guardar el ID del perfil actualizado
+      } else {
+        console.warn(
+          `Usuario con profileId ${user.profileId} no encontrado en ${listField}.`
+        );
+      }
+    }
+
+    // Ejecutar el batch de actualizaciones
+    await batch.commit();
+
+    // Registrar el movimiento
+    await logMovement(
+      profileId,
+      gymId,
+      currentListType, // Usar la lista actual como sección
+      'updatePositions', // Acción realizada
+      [classId], // Clase afectada
+      updatedProfiles // IDs de los perfiles afectados
+    );
+
+    res.status(200).send({ message: 'Posiciones actualizadas correctamente.' });
+  } catch (error) {
+    console.error('Error al actualizar posiciones:', error.message);
+    res.status(500).send({ message: 'Error al actualizar posiciones.' });
+  }
+};
+
+const removeUnknownMemberFromWaitingList = async (req, res) => {
+  const { deletedProfileId, classId, profileId, gymId } = req.body;
+
+  try {
+    // Referencia a la colección de clases y al documento específico
+    const classRef = db.collection('classes').doc(classId);
+    const classDoc = await classRef.get();
+
+    if (!classDoc.exists) {
+      return res.status(404).json({ error: 'Class not found' });
+    }
+
+    // Referencia a la subcolección unknownWaitingList
+    const waitingListRef = classRef.collection('unknownWaitingList');
+    const snapshot = await waitingListRef
+      .where('profileId', '==', deletedProfileId)
+      .get();
+
+    if (snapshot.empty) {
+      return res
+        .status(404)
+        .json({ error: 'Profile not found in waiting list' });
+    }
+
+    // Eliminar el perfil de la lista de espera
+    const batch = db.batch();
+    snapshot.forEach((doc) => {
+      batch.delete(doc.ref);
+    });
+
+    await batch.commit();
+
+    await logMovement(
+      profileId, // ID del perfil que está realizando la acción
+      gymId, // ID del gimnasio
+      'classes', // Sección afectada
+      'removeNonMemberWaitingList', // Acción realizada
+      [classId], // Clases afectadas
+      [deletedProfileId] // Perfiles afectados
+    );
+
+    return res
+      .status(200)
+      .json({ message: 'Member removed from waiting list successfully' });
+  } catch (error) {
+    console.error('Error removing member from waiting list:', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+};
+const removeMemberFromWaitingList = async (req, res) => {
+  const { deletedProfileId, classId, profileId, gymId } = req.body;
+
+  if (!deletedProfileId || !classId) {
+    return res
+      .status(400)
+      .json({ error: 'Profile ID and class ID are required' });
+  }
+
+  try {
+    // Referencia a la colección de clases y a la subcolección waitingList
+    const classRef = db.collection('classes').doc(classId);
+    const waitingListRef = classRef
+      .collection('waitingList')
+      .doc(deletedProfileId);
+
+    // Verificar si el documento existe
+    const waitingListDoc = await waitingListRef.get();
+
+    if (!waitingListDoc.exists) {
+      return res
+        .status(404)
+        .json({ error: 'Member not found in waiting list' });
+    }
+
+    // Eliminar el miembro de la lista de espera
+    await waitingListRef.delete();
+
+    // Registrar la eliminación en los logs
+    await logMovement(
+      profileId, // ID del perfil que está realizando la acción
+      gymId, // ID del gimnasio
+      'classes', // Sección afectada
+      'removeMemberFromWaitingList', // Acción realizada
+      [classId], // Clases afectadas
+      [deletedProfileId] // Perfiles afectados
+    );
+
+    return res
+      .status(200)
+      .json({ message: 'Member successfully removed from waiting list' });
+  } catch (error) {
+    console.error('Error removing member from waiting list:', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+const addClassMemberWaitingList = async (req, res) => {
+  try {
+    const { memberForm, classId, profileId, gymId } = req.body;
+
+    // Encontrar el miembro que se va a agregar
+    const participantAdded = memberForm.find(
+      (participant) => participant.profileId === profileId
+    );
+
+    if (!participantAdded) {
+      return res.status(400).json({
+        message: 'Member with the provided profileId not found',
+      });
+    }
+
+    const participantProfileId = participantAdded.profileId;
+
+    // Referencia al documento de la clase
+    const classDocRef = db.collection('classes').doc(classId);
+    const classDoc = await classDocRef.get();
+
+    if (!classDoc.exists) {
+      return res.status(404).json({ message: 'Class not found' });
+    }
+
+    // Referencia a la colección de la lista de espera de miembros
+    const waitingListCollection = classDocRef.collection('waitingList');
+
+    // Verificar si el perfil ya está en la lista de espera
+    const existingProfile = await waitingListCollection.doc(profileId).get();
+    if (existingProfile.exists) {
+      return res.status(400).json({
+        message: 'Profile is already on the waiting list',
+      });
+    }
+
+    // Obtener la siguiente posición en la lista de espera
+    const waitingListSnapshot = await waitingListCollection
+      .orderBy('position', 'desc')
+      .limit(1)
+      .get();
+
+    const nextPosition = waitingListSnapshot.empty
+      ? 1
+      : waitingListSnapshot.docs[0].data().position + 1;
+
+    // Crear el objeto del miembro que se va a agregar
+    const waitingMember = {
+      ...participantAdded,
+      position: nextPosition,
+      addedAt: new Date().toISOString(),
+    };
+
+    // Agregar el miembro a la lista de espera
+    await waitingListCollection.doc(profileId).set(waitingMember);
+
+    // Registrar el movimiento en el log
+    await logMovement(
+      profileId,
+      gymId,
+      'classes',
+      'addMemberToWaitingList',
+      [classId],
+      [participantProfileId]
+    );
+
+    return res.status(200).json({
+      message: 'Member successfully added to the waiting list',
+      member: waitingMember,
+    });
+  } catch (error) {
+    console.error('Error adding member to waiting list:', error);
+    return res.status(500).json({
+      message: 'Internal server error while adding member to the waiting list',
+    });
+  }
+};
+
+const addClassUnknownWaitingList = async (req, res) => {
+  try {
+    const { memberForm, classId, profileId, gymId } = req.body;
+
+    // Find the participant to be added
+    const participantAdded = memberForm.find(
+      (participant) => participant.profileId === profileId
+    );
+
+    if (!participantAdded) {
+      return res.status(400).json({
+        message: 'Participant with the provided profileId not found',
+      });
+    }
+    const participantProfileId = participantAdded.profileId;
+
+    // Validate currentCredit, deductedAtBooking, and prepaymentType
+    const { currentCredit, deductedAtBooking, prepaymentType } =
+      participantAdded.selectedPackage;
+
+    if (currentCredit === 0) {
+      return res.status(400).json({
+        message: 'This member does not have available credit',
+      });
+    }
+
+    if (prepaymentType !== 1 && prepaymentType !== 3) {
+      return res.status(400).json({
+        message: "This member's package does not allow booking this class",
+      });
+    }
+
+    if (deductedAtBooking) {
+      participantAdded.currentCredit--;
+
+      const profileRef = db.collection('profiles').doc(profileId);
+      await profileRef.update({
+        currentCredit: admin.firestore.FieldValue.increment(-1),
+      });
+    }
+
+    const classDocRef = db.collection('classes').doc(classId);
+    const classDoc = await classDocRef.get();
+
+    if (!classDoc.exists) {
+      return res.status(404).json({ message: 'Class not found' });
+    }
+
+    const waitingListCollection = classDocRef.collection('unknownWaitingList');
+
+    const existingProfile = await waitingListCollection.doc(profileId).get();
+    if (existingProfile.exists) {
+      return res.status(400).json({
+        message: 'Profile is already on the waiting list',
+      });
+    }
+
+    const waitingListSnapshot = await waitingListCollection
+      .orderBy('position', 'desc')
+      .limit(1)
+      .get();
+
+    const nextPosition = waitingListSnapshot.empty
+      ? 1
+      : waitingListSnapshot.docs[0].data().position + 1;
+
+    const waitingMember = {
+      ...participantAdded,
+      position: nextPosition,
+      addedAt: new Date().toISOString(),
+    };
+
+    await waitingListCollection.doc(profileId).set(waitingMember);
+
+    await logMovement(
+      profileId,
+      gymId,
+      'classes',
+      'addNonMemberToWaitingList',
+      [classId],
+      [participantProfileId]
+    );
+
+    return res.status(200).json({
+      message: 'Profile successfully added to the waiting list',
+      member: waitingMember,
+    });
+  } catch (error) {
+    console.error('Error adding profile to waiting list:', error);
+    return res.status(500).json({
+      message: 'Internal server error while adding profile to the waiting list',
+    });
+  }
+};
+
 module.exports = {
   createClass,
   createPrimaryClasses,
@@ -1757,15 +2195,20 @@ module.exports = {
   deletePrimaryClass,
   deleteAllClasses,
   updateClass,
+  updateUserPositions,
   updateAllClasses,
   updatePrimaryClasses,
   generateClassReport,
   getTrainers,
   changeMemberAttendanceStatus,
+  addClassUnknownWaitingList,
+  addClassMemberWaitingList,
   addParticipants,
   removeParticipant,
   cancelClass,
   getTodaysClasses,
   addUnknownParticipants,
+  removeUnknownMemberFromWaitingList,
+  removeMemberFromWaitingList,
   removeUnknownParticipant,
 };

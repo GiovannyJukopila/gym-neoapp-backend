@@ -3,6 +3,8 @@ const router = express.Router();
 const {
   addClassUnknownParticipants,
   addClassParticipants,
+  addToUnknownMemberWaitingList,
+  addToMemberWaitingList,
   cancelMemberClass,
   cancelMemberCourt,
   getUnknownMemberClassesByProfileId,
@@ -18,6 +20,12 @@ router.post(
   addClassUnknownParticipants
 );
 router.post('/addClassParticipants', verifyToken, addClassParticipants);
+router.post(
+  '/addToUnknownMemberWaitingList',
+  verifyToken,
+  addToUnknownMemberWaitingList
+);
+router.post('/addToMemberWaitingList', verifyToken, addToMemberWaitingList);
 router.post('/cancelMemberClass', verifyToken, cancelMemberClass);
 
 router.post(

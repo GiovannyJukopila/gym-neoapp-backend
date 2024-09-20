@@ -7,17 +7,22 @@ const {
   getTrainers,
   getWeekClasses,
   changeMemberAttendanceStatus,
+  addClassUnknownWaitingList,
+  addClassMemberWaitingList,
   addParticipants,
   addUnknownParticipants,
   createClass,
   createPrimaryClasses,
   updateClass,
+  updateUserPositions,
   updateAllClasses,
   updatePrimaryClasses,
   generateClassReport,
   deleteClass,
   deletePrimaryClass,
   deleteAllClasses,
+  removeUnknownMemberFromWaitingList,
+  removeMemberFromWaitingList,
   removeParticipant,
   removeUnknownParticipant,
   cancelClass,
@@ -42,6 +47,18 @@ router.post(
   changeMemberAttendanceStatus
 );
 
+router.post(
+  '/addClassUnknownWaitingList',
+  verifyToken,
+  addClassUnknownWaitingList
+);
+
+router.post(
+  '/addClassMemberWaitingList',
+  verifyToken,
+  addClassMemberWaitingList
+);
+
 router.post('/addParticipants', verifyToken, addParticipants);
 
 router.post('/addUnknownParticipants', verifyToken, addUnknownParticipants);
@@ -51,6 +68,12 @@ router.post('/create', verifyToken, createClass);
 router.post('/createPrimaryClasses', verifyToken, createPrimaryClasses);
 
 router.post('/update', verifyToken, updateClass);
+
+router.post(
+  '/waitinglist/updateUserPositions',
+  verifyToken,
+  updateUserPositions
+);
 
 router.post('/updateAllClasses', verifyToken, updateAllClasses);
 
@@ -63,6 +86,18 @@ router.post('/cancelClass', verifyToken, cancelClass);
 router.post('/removeParticipant', verifyToken, removeParticipant);
 
 router.post('/removeUnknownParticipant', verifyToken, removeUnknownParticipant);
+
+router.post(
+  '/removeUnknownMemberFromWaitingList',
+  verifyToken,
+  removeUnknownMemberFromWaitingList
+);
+
+router.post(
+  '/removeMemberFromWaitingList',
+  verifyToken,
+  removeMemberFromWaitingList
+);
 
 router.post('/deletePrimaryClass/:classId', verifyToken, deletePrimaryClass);
 
