@@ -2185,6 +2185,376 @@ const addClassUnknownWaitingList = async (req, res) => {
   }
 };
 
+const moveMemberToBookings = async (req, res) => {
+  const { memberProfileId, classId, gymId } = req.body;
+
+  try {
+    // Referencias a las colecciones de waitingList y participants
+    const waitingListCollectionRef = db
+      .collection('classes')
+      .doc(classId)
+      .collection('waitingList');
+
+    const participantsCollectionRef = db
+      .collection('classes')
+      .doc(classId)
+      .collection('participants');
+
+    const classRef = db.collection('classes').doc(classId);
+
+    // Obtener los datos de la clase
+    const classDoc = await classRef.get();
+    const classData = classDoc.data();
+
+    // Obtener al miembro de la lista de espera
+    const waitingMemberDocRef = waitingListCollectionRef.doc(memberProfileId);
+    const waitingMemberDoc = await waitingMemberDocRef.get();
+
+    if (!waitingMemberDoc.exists) {
+      return res
+        .status(404)
+        .json({ message: 'Member not found in the waiting list' });
+    }
+
+    const waitingMemberData = waitingMemberDoc.data();
+
+    // Generar el código QR para el nuevo participante
+    const qrData = `${waitingMemberData.profileId},${classId}`;
+    const qrCode = await generateQRCode(qrData);
+
+    // Crear el nuevo participante con el QR
+    const newParticipant = {
+      ...waitingMemberData,
+      qrCode: qrCode,
+      attendance: false,
+    };
+
+    // Iniciar un batch para las escrituras atómicas
+    const batch = db.batch();
+
+    // Mover al miembro de la lista de espera a la lista de participantes
+    const newParticipantRef = participantsCollectionRef.doc(memberProfileId);
+    batch.set(newParticipantRef, newParticipant);
+
+    // Eliminar al miembro de la lista de espera
+    batch.delete(waitingMemberDocRef);
+
+    // Actualizar el contador de la lista de espera
+    const waitingListSnapshot = await waitingListCollectionRef.get();
+    const currentWaitingListCount = waitingListSnapshot.size - 1;
+    batch.update(classRef, {
+      currentWaitingListCount: currentWaitingListCount,
+      currentClassParticipants: classData.currentClassParticipants + 1,
+    });
+
+    // Ejecutar el batch
+    await batch.commit();
+
+    await sendNotificationEmail(
+      waitingMemberData.profileEmail,
+      waitingMemberData.profileName,
+      classData.className,
+      classData.eventDate,
+      classData.startTime,
+      classData.endTime
+    );
+
+    // Retornar el nuevo participante al frontend
+    res.status(200).json({
+      message: 'Member moved to bookings successfully',
+      newParticipant: newParticipant,
+    });
+  } catch (error) {
+    console.error('Error moving member to bookings:', error);
+    res.status(500).json({
+      message: 'Error moving member to bookings',
+      error: error.message,
+    });
+  }
+};
+
+const moveNonmemberToBookings = async (req, res) => {
+  const { nonMemberProfileId, classId, gymId } = req.body;
+
+  try {
+    // Referencias a las colecciones de waitingList y participants
+
+    const waitingListCollectionRef = db
+      .collection('classes')
+      .doc(classId)
+      .collection('unknownWaitingList');
+
+    const participantsCollectionRef = db
+      .collection('classes')
+      .doc(classId)
+      .collection('unknownParticipants');
+
+    const classRef = db.collection('classes').doc(classId);
+
+    // Obtener los datos de la clase
+    const classDoc = await classRef.get();
+    const classData = classDoc.data();
+
+    // Obtener al no miembro de la lista de espera
+    const waitingNonMemberDocRef =
+      waitingListCollectionRef.doc(nonMemberProfileId);
+    const waitingNonMemberDoc = await waitingNonMemberDocRef.get();
+
+    if (!waitingNonMemberDoc.exists) {
+      return res
+        .status(404)
+        .json({ message: 'Non-member not found in the waiting list' });
+    }
+
+    const waitingNonMemberData = waitingNonMemberDoc.data();
+
+    // Verificar el crédito del perfil en la lista de espera
+    const profileDoc = await db
+      .collection('profiles')
+      .doc(nonMemberProfileId)
+      .get();
+    const {
+      currentCredit,
+      selectedPackage: { deductedAtBooking },
+    } = profileDoc.data();
+
+    // Si el crédito es mayor a 0, continuar
+    if (currentCredit > 0) {
+      // Generar el código QR para el nuevo participante
+      const qrData = `${waitingNonMemberData.profileId},${classId}`;
+      const qrCode = await generateQRCode(qrData);
+
+      // Crear el nuevo participante con el QR
+      const newParticipant = {
+        ...waitingNonMemberData,
+        qrCode: qrCode,
+        attendance: false,
+      };
+
+      // Iniciar un batch para las escrituras atómicas
+      const batch = db.batch();
+
+      // Mover al no miembro de la lista de espera a la lista de participantes
+      const newParticipantRef =
+        participantsCollectionRef.doc(nonMemberProfileId);
+      batch.set(newParticipantRef, newParticipant);
+
+      // Eliminar al no miembro de la lista de espera
+      batch.delete(waitingNonMemberDocRef);
+
+      batch.update(classRef, {
+        currentUnknownClassParticipants:
+          classData.currentUnknownClassParticipants + 1,
+      });
+
+      // Descontar el crédito si es necesario
+      if (deductedAtBooking) {
+        await db
+          .collection('profiles')
+          .doc(nonMemberProfileId)
+          .update({
+            currentCredit: admin.firestore.FieldValue.increment(-1),
+          });
+      }
+
+      // Ejecutar el batch
+      await batch.commit();
+
+      // Enviar notificación por correo electrónico
+      await sendNotificationEmail(
+        waitingNonMemberData.profileEmail,
+        waitingNonMemberData.profileName,
+        classData.className,
+        classData.eventDate,
+        classData.startTime,
+        classData.endTime
+      );
+
+      // Retornar el nuevo participante al frontend
+      res.status(200).json({
+        message: 'Non-member moved to bookings successfully',
+        newParticipant: newParticipant,
+      });
+    } else {
+      // Si el no miembro no tiene crédito
+      return res.status(400).json({
+        message: 'Non-member does not have enough credits to book a class.',
+      });
+    }
+  } catch (error) {
+    console.error('Error moving non-member to bookings:', error);
+    res.status(500).json({
+      message: 'Error moving non-member to bookings',
+      error: error.message,
+    });
+  }
+};
+
+const formatDateTime = (eventDate, startTime, endTime) => {
+  if (eventDate && startTime && endTime) {
+    // Formatea la fecha
+    const formattedDate = format(new Date(eventDate), 'EEEE, MMMM d, y');
+
+    // Convierte el tiempo en formato de 24 horas a formato de 12 horas
+    const formattedStartTime = format(
+      new Date(`1970-01-01T${startTime}:00`),
+      'h:mm a'
+    );
+    const formattedEndTime = format(
+      new Date(`1970-01-01T${endTime}:00`),
+      'h:mm a'
+    );
+
+    return {
+      formattedDate,
+      formattedStartTime,
+      formattedEndTime,
+    };
+  }
+  return {
+    formattedDate: '',
+    formattedStartTime: '',
+    formattedEndTime: '',
+  };
+};
+
+const generateNotificationEmailTemplate = (
+  name,
+  className,
+  eventDate,
+  startTime,
+  endTime
+) => {
+  // Formatear las fechas y horas
+  const { formattedDate, formattedStartTime, formattedEndTime } =
+    formatDateTime(eventDate, startTime, endTime);
+
+  return `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <style>
+        body {
+          font-family: Arial, sans-serif;
+          margin: 0;
+          padding: 0;
+          background-color: #f4f4f4;
+        }
+        .container {
+          width: 100%;
+          max-width: 600px;
+          margin: 20px auto;
+          padding: 20px;
+          background-color: #ffffff;
+          border-radius: 8px;
+          box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+        .title {
+          font-size: 24px;
+          font-weight: bold;
+          color: #333333;
+          text-align: center;
+        }
+        .text {
+          font-size: 16px;
+          color: #555555;
+          margin-bottom: 20px;
+          text-align: center;
+        }
+        table {
+          width: 100%;
+          border-collapse: collapse;
+        }
+        th, td {
+          padding: 10px;
+          text-align: left;
+          border-bottom: 1px solid #dddddd;
+        }
+        th {
+          background-color: #f2f2f2;
+          color: #333333;
+        }
+        .footer {
+          margin-top: 20px;
+          font-size: 14px;
+          color: #777777;
+          text-align: center;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <div class="title">You’ve Been Added to the Class!</div>
+        <p class="text">Hi ${name},</p>
+        <p class="text">Good news! A spot has opened up in your class. Here are the details:</p>
+        <table>
+          <tr>
+            <th>Class Name</th>
+            <td>${className}</td>
+          </tr>
+          <tr>
+            <th>Date</th>
+            <td>${formattedDate}</td>
+          </tr>
+          <tr>
+            <th>Start Time</th>
+            <td>${formattedStartTime}</td>
+          </tr>
+          <tr>
+            <th>End Time</th>
+            <td>${formattedEndTime}</td>
+          </tr>
+        </table>
+        <p class="text">You have been added to the class and are no longer on the waiting list. We look forward seeing you in the class!</p>
+        <div class="footer">If you have any questions, feel free to contact us.</div>
+      </div>
+    </body>
+    </html>
+  `;
+};
+
+const sendNotificationEmail = async (
+  email,
+  name,
+  className,
+  eventDate,
+  startTime,
+  endTime
+) => {
+  const renderedTemplate = generateNotificationEmailTemplate(
+    name,
+    className,
+    eventDate,
+    startTime,
+    endTime
+  );
+
+  const params = {
+    Source: 'NeoApp - Class Notification <no-reply@neoappgym.com>', // Dirección de remitente verificada en SES
+    Destination: {
+      ToAddresses: [email], // Dirección del destinatario
+    },
+    Message: {
+      Subject: { Data: 'You’ve Been Added to the Class!' }, // Asunto del correo
+      Body: {
+        Html: {
+          Data: renderedTemplate, // Cuerpo del correo en HTML
+        },
+        Text: {
+          Data: `Hi ${name},\n\nGood news! A spot has opened up in your class.\n\nClass Name: ${className}\nDate: ${eventDate}\nStart Time: ${startTime}\nEnd Time: ${endTime}\n\nYou have been added to the class and are no longer on the waiting list.\n\nWe look forward to seeing you in the class!`, // Cuerpo del correo en texto plano
+        },
+      },
+    },
+  };
+
+  try {
+    // Enviar el correo electrónico
+    await sesClient.send(new SendEmailCommand(params));
+  } catch (error) {
+    console.error('Error sending email:', error);
+  }
+};
+
 module.exports = {
   createClass,
   createPrimaryClasses,
@@ -2196,6 +2566,8 @@ module.exports = {
   deleteAllClasses,
   updateClass,
   updateUserPositions,
+  moveMemberToBookings,
+  moveNonmemberToBookings,
   updateAllClasses,
   updatePrimaryClasses,
   generateClassReport,

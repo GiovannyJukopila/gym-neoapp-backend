@@ -31,8 +31,8 @@ const logUserPenalty = async (
   gymId,
   penaltyType, // Ej: "timeRestriction", "monetary"
   details, // Detalles sobre la penalización: monto monetario, días de restricción, etc.
-  timestamp = new Date(), // Usa la fecha actual si no se pasa un timestamp
-  penaltyStatus
+  penaltyStatus,
+  timestamp = new Date() // Usa la fecha actual si no se pasa un timestamp
 ) => {
   try {
     if (!profileId || !gymId || !penaltyType || !details) {
@@ -43,7 +43,6 @@ const logUserPenalty = async (
     const gymTimeZone = await getGymTimeZone(gymId);
 
     // Ajustar la hora al huso horario del gimnasio
-    console.log('timestamp : ', timestamp);
     const localTimestamp = getLocalTime(timestamp, gymTimeZone);
 
     const userPenaltiesCollection = db

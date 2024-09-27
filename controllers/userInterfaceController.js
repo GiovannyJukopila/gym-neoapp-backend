@@ -18,6 +18,50 @@ const sesClient = new SESClient({
   },
 });
 
+const getUserPenalties = async (req, res) => {
+  try {
+    const { profileId } = req.params;
+
+    // Obtener la referencia a la subcolección de penalties dentro del perfil (profile)
+    const penaltiesSnapshot = await db
+      .collection('profiles')
+      .doc(profileId)
+      .collection('userPenalties')
+      .where('status', '==', 'active') // Filtrar solo los penalties con status "active"
+      .get();
+
+    if (penaltiesSnapshot.empty) {
+      return res.status(404).json({ message: 'No active penalties found' });
+    }
+
+    // Extraer los datos de las penalizaciones activas
+    const activePenalties = penaltiesSnapshot.docs.map((doc) => {
+      const data = doc.data();
+      const timestamp = data.timestamp;
+
+      // Extraer la fecha y la hora
+      const date = timestamp.split('T')[0]; // '2024-09-24'
+      const time = timestamp.split('T')[1].split('.')[0]; // '13:35:53'
+      const formattedTime = `${parseInt(time.split(':')[0]) % 12 || 12}:${
+        time.split(':')[1]
+      } ${time.split(':')[0] >= 12 ? 'PM' : 'AM'}`; // Formato 12 horas
+
+      return {
+        id: doc.id,
+        ...data,
+        timestamp: `${date}, ${formattedTime}`, // Formato deseado
+      };
+    });
+
+    return res.status(200).json(activePenalties);
+  } catch (error) {
+    console.error('Error fetching user penalties:', error);
+    return res
+      .status(500)
+      .json({ message: 'Error fetching user penalties', error });
+  }
+};
+
 const addClassUnknownParticipants = async (req, res) => {
   try {
     const classId = req.body.classId;
@@ -552,6 +596,31 @@ const cancelMemberClass = async (req, res) => {
       let updatedCancellationCount = cancellationCount + 1;
       let penaltyDetails = null;
 
+      const classStartTime = classData.startTime; // "11:00"
+      const classEventDate = new Date(classData.eventDate); // "2024-09-25T00:00:00.000Z"
+
+      // Validar si el usuario está dentro del tiempo permitido para cancelar sin penalización
+      let penaltyWaiveTime = null;
+      if (primaryClassData.memberRestrictions.penaltyWaiveUnit === 'days') {
+        penaltyWaiveTime =
+          primaryClassData.memberRestrictions.penaltyWaiveDays *
+          24 *
+          60 *
+          60 *
+          1000; // Convertir días a milisegundos
+      } else if (
+        primaryClassData.memberRestrictions.penaltyWaiveUnit === 'hours'
+      ) {
+        penaltyWaiveTime =
+          primaryClassData.memberRestrictions.penaltyWaiveHours *
+          60 *
+          60 *
+          1000; // Convertir horas a milisegundos
+      }
+
+      // Calcular el tiempo hasta el inicio de la clase
+      const timeUntilClassStart = classEventDate.getTime() - localNow.getTime();
+
       if (diffDays > 30) {
         // Resetear el contador de cancelaciones y actualizar la fecha
         updatedCancellationCount = 1;
@@ -567,9 +636,14 @@ const cancelMemberClass = async (req, res) => {
 
         const maxCancellations =
           primaryClassData.memberRestrictions.maxCancellationsPer30Days;
-        if (maxCancellations && updatedCancellationCount > maxCancellations) {
+        if (
+          maxCancellations &&
+          (updatedCancellationCount > maxCancellations ||
+            timeUntilClassStart <= penaltyWaiveTime)
+        ) {
           const penaltyType = primaryClassData.memberRestrictions.penaltyType; // Obtener el tipo de penalización
           let penaltyAmount = 0;
+          let reason = '';
 
           if (penaltyType === 'monetary') {
             penaltyAmount = primaryClassData.memberRestrictions.monetaryAmount;
@@ -578,9 +652,27 @@ const cancelMemberClass = async (req, res) => {
               primaryClassData.memberRestrictions.timeRestrictionDays;
           }
 
+          if (updatedCancellationCount > maxCancellations) {
+            reason = `Exceeded the maximum allowed cancellations of ${maxCancellations} within 30 days.`;
+          } else if (timeUntilClassStart <= penaltyWaiveTime) {
+            const penaltyUnit =
+              primaryClassData.memberRestrictions.penaltyWaiveUnit;
+            const penaltyWaiveValue =
+              penaltyUnit === 'hours'
+                ? primaryClassData.memberRestrictions.penaltyWaiveHours
+                : primaryClassData.memberRestrictions.penaltyWaiveDays;
+
+            reason = `Cancellation occurred less than ${penaltyWaiveValue} ${penaltyUnit} before the class started.`;
+          }
+
+          await profileRef.update({
+            penaltyActive: true, // Establecer penaltyActive a true cuando se impone una penalización
+          });
+
           const penaltyDetails = {
             type: penaltyType,
             amount: penaltyAmount,
+            reason,
           };
 
           await logUserPenalty(
@@ -588,7 +680,7 @@ const cancelMemberClass = async (req, res) => {
             gymId,
             penaltyDetails.type,
             penaltyDetails,
-            penaltyStatus
+            true
           );
         }
       }
@@ -636,7 +728,35 @@ const cancelMemberClass = async (req, res) => {
       const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
 
       let updatedCancellationCount = cancellationCount + 1;
-      let penaltyDetails = null;
+
+      const classStartTime = classData.startTime; // "11:00"
+      const classEventDate = new Date(classData.eventDate); // "2024-09-25T00:00:00.000Z"
+
+      // Validar si el usuario está dentro del tiempo permitido para cancelar sin penalización
+      let penaltyWaiveTime = null;
+      if (
+        primaryClassData.nonMemberRestrictions.penaltyNonMemberWaiveUnit ===
+        'days'
+      ) {
+        penaltyWaiveTime =
+          primaryClassData.nonMemberRestrictions.penaltyNonMemberWaiveDays *
+          24 *
+          60 *
+          60 *
+          1000; // Convertir días a milisegundos
+      } else if (
+        primaryClassData.nonMemberRestrictions.penaltyNonMemberWaiveUnit ===
+        'hours'
+      ) {
+        penaltyWaiveTime =
+          primaryClassData.nonMemberRestrictions.penaltyNonMemberWaiveHours *
+          60 *
+          60 *
+          1000; // Convertir horas a milisegundos
+      }
+
+      // Calcular el tiempo hasta el inicio de la clase
+      const timeUntilClassStart = classEventDate.getTime() - localNow.getTime();
 
       if (diffDays > 30) {
         // Resetear el contador de cancelaciones y actualizar la fecha
@@ -654,23 +774,48 @@ const cancelMemberClass = async (req, res) => {
         const maxCancellations =
           primaryClassData.nonMemberRestrictions.maxNonMembersCancellations;
 
-        if (maxCancellations && updatedCancellationCount > maxCancellations) {
+        if (
+          maxCancellations &&
+          (updatedCancellationCount > maxCancellations ||
+            timeUntilClassStart <= penaltyWaiveTime)
+        ) {
           const nonMemberCreditsPenalty =
             primaryClassData.nonMemberRestrictions.nonMemberCreditsPenalty;
 
           if (nonMemberCreditsPenalty && nonMemberCreditsPenalty > 0) {
             const penaltyAmount = nonMemberCreditsPenalty;
+            let reason = '';
+
+            if (updatedCancellationCount > maxCancellations) {
+              reason = `Exceeded the maximum allowed cancellations of ${maxCancellations} within 30 days.`;
+            } else if (timeUntilClassStart <= penaltyWaiveTime) {
+              const penaltyUnit =
+                primaryClassData.nonMemberRestrictions
+                  .penaltyNonMemberWaiveUnit;
+              const penaltyWaiveValue =
+                penaltyUnit === 'hours'
+                  ? primaryClassData.nonMemberRestrictions
+                      .penaltyNonMemberWaiveHours
+                  : primaryClassData.nonMemberRestrictions
+                      .penaltyNonMemberWaiveDays;
+
+              reason = `Cancellation occurred less than ${penaltyWaiveValue} ${penaltyUnit} before the class started.`;
+            }
 
             // Permitir que el saldo de créditos sea negativo
             const updatedCredits = profileData.currentCredit - penaltyAmount;
-            await profileRef.update({ currentCredit: updatedCredits });
+            await profileRef.update({
+              currentCredit: updatedCredits,
+              penaltyActive: true,
+            });
             const penaltyDetails = {
               type: 'creditsPenalty',
               amount: penaltyAmount,
+              reason,
             };
             const penaltyStatus = updatedCredits < 0; // true si negativo, false si 0 o positivo
+
             await logUserPenalty(
-              role,
               profileId,
               gymId,
               penaltyDetails.type,
@@ -678,6 +823,16 @@ const cancelMemberClass = async (req, res) => {
               penaltyStatus // Pasar el estado como argumento
             );
           }
+        }
+
+        if (
+          profileData.selectedPackage.deductedAtBooking &&
+          timeUntilClassStart > penaltyWaiveTime
+        ) {
+          const updatedCredits = profileData.currentCredit + 1;
+          await profileRef.update({
+            currentCredit: updatedCredits,
+          });
         }
       }
 
@@ -801,18 +956,6 @@ const cancelMemberClass = async (req, res) => {
                 .update({
                   currentCredit: admin.firestore.FieldValue.increment(-1),
                 });
-            }
-
-            // Actualizar el contador de la lista de espera si es necesario
-            if (waitingListCounterField) {
-              const updatedWaitingListSnapshot =
-                await waitingListCollectionRef.get();
-              const currentWaitingListCount =
-                updatedWaitingListSnapshot.size - 1;
-
-              await classRef.update({
-                [waitingListCounterField]: currentWaitingListCount,
-              });
             }
 
             // Enviar notificación por correo electrónico
@@ -1280,7 +1423,141 @@ const sendNotificationEmail = async (
   }
 };
 
+const payPenalty = async (req, res) => {
+  try {
+    const { penaltyId, profileId, gymId } = req.body;
+
+    // 1. Obtener la información del perfil usando profileId
+    const profileRef = db.collection('profiles').doc(profileId);
+    const profileDoc = await profileRef.get();
+
+    if (!profileDoc.exists) {
+      return res.status(404).json({ error: 'Profile not found.' });
+    }
+
+    const profileData = profileDoc.data();
+    const membershipId = profileData.membershipId; // Obtener el membershipId del perfil
+
+    // 2. Acceder a la subcolección de penalizaciones
+    const penaltiesRef = profileRef.collection('userPenalties');
+    const penaltyDoc = await penaltiesRef.doc(penaltyId).get();
+
+    if (!penaltyDoc.exists) {
+      return res.status(404).json({ error: 'Penalty not found.' });
+    }
+
+    const penaltyData = penaltyDoc.data();
+    const paymentAmount = penaltyData.details.amount; // Obtener el monto de la penalización
+    const paymentPenaltyReason = penaltyData.details.reason;
+
+    // 3. Registrar el pago en paymentHistory
+    const paymentHistoryRef = db.collection('paymentHistory');
+    const newPaymentHistoryDoc = paymentHistoryRef.doc();
+    const paymentId = newPaymentHistoryDoc.id;
+    let paymentHistoryData;
+
+    if (profileData.role.includes('member')) {
+      paymentHistoryData = {
+        paymentId: paymentId,
+        profileId: profileId,
+        membershipId: membershipId, // Usar el membershipId obtenido del perfil
+        gymId: gymId,
+        paymentDate: new Date().toISOString().slice(0, 10),
+        cardSerialNumber: profileData.cardSerialNumber,
+        paymentType: 'Penalty',
+        paymentAmount: paymentAmount, // Usar el monto de la penalización
+        paymentPenaltyReason: paymentPenaltyReason, // Agregar la razón del pago
+        // ... (otros datos relacionados con el pago o historial)
+      };
+    } else if (profileData.role.includes('unknownMember')) {
+      paymentHistoryData = {
+        paymentId: paymentId,
+        profileId: profileId,
+        gymId: gymId,
+        memberType: 'unknownMember',
+        paymentDate: new Date().toISOString().slice(0, 10),
+        paymentType: 'Penalty',
+        cardSerialNumber: profileData.cardSerialNumber, // Suponiendo que este dato existe en profileData
+        paymentPenaltyReason: paymentPenaltyReason,
+        paymentPackage: profileData.selectedPackage, // Suponiendo que este dato existe en profileData
+        paymentAmount: paymentAmount, // Establecer el paymentAmount obtenido del membership
+        // ... (otros datos relacionados con el pago o historial)
+      };
+    }
+
+    await paymentHistoryRef.doc(paymentId).set(paymentHistoryData);
+
+    // 4. Actualizar el estado de la penalización a 'inactive'
+    await penaltiesRef.doc(penaltyId).update({ status: 'inactive' });
+
+    // 5. Verificar si hay otras penalizaciones activas
+    const activePenaltiesSnapshot = await penaltiesRef
+      .where('status', '==', 'active')
+      .get();
+
+    const hasActivePenalties = !activePenaltiesSnapshot.empty;
+
+    // 6. Actualizar el campo penaltyActive en el perfil si no hay más penalizaciones activas
+    await profileRef.update({ penaltyActive: hasActivePenalties });
+
+    return res.status(200).json({
+      message: 'Penalty paid and status updated to inactive successfully.',
+    });
+  } catch (error) {
+    console.error(`Error processing penalty payment: ${error.message}`);
+    return res
+      .status(500)
+      .json({ error: 'Failed to process penalty payment.' });
+  }
+};
+
+const updatePenaltyStatus = async (req, res) => {
+  const { penaltyId, status, profileId } = req.body;
+
+  try {
+    // Obtener referencia a la penalización
+    const penaltyRef = db
+      .collection('profiles')
+      .doc(profileId)
+      .collection('userPenalties')
+      .doc(penaltyId);
+
+    // Verificar si la penalización existe
+    const penaltyDoc = await penaltyRef.get();
+    if (!penaltyDoc.exists) {
+      return res.status(404).json({ message: 'Penalty not found' });
+    }
+
+    // Actualizar el estado de la penalización
+    await penaltyRef.update({ status: status });
+
+    // Comprobar si quedan penalizaciones activas
+    const penaltiesSnapshot = await db
+      .collection('profiles')
+      .doc(profileId)
+      .collection('userPenalties')
+      .where('status', '==', 'active') // Suponiendo que 'active' es el estado para penalizaciones activas
+      .get();
+
+    const hasActivePenalties = !penaltiesSnapshot.empty;
+
+    // Actualizar el campo penaltyActive en el perfil si no quedan penalizaciones activas
+    const profileRef = db.collection('profiles').doc(profileId);
+    await profileRef.update({ penaltyActive: hasActivePenalties });
+
+    return res
+      .status(200)
+      .json({ message: 'Penalty status updated successfully' });
+  } catch (error) {
+    console.error('Error updating penalty status:', error);
+    return res
+      .status(500)
+      .json({ message: 'Error updating penalty status', error });
+  }
+};
+
 module.exports = {
+  getUserPenalties,
   addClassUnknownParticipants,
   addClassParticipants,
   cancelMemberClass,
@@ -1291,4 +1568,6 @@ module.exports = {
   getmemberCourtsByProfileId,
   addToMemberWaitingList,
   addToUnknownMemberWaitingList,
+  payPenalty,
+  updatePenaltyStatus,
 };

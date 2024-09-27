@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const {
+  getUserPenalties,
   addClassUnknownParticipants,
   addClassParticipants,
   addToUnknownMemberWaitingList,
@@ -11,8 +12,12 @@ const {
   getmemberClassesByProfileId,
   getUnknownMemberCourtsByProfileId,
   getmemberCourtsByProfileId,
+  payPenalty,
+  updatePenaltyStatus,
 } = require('../controllers/userInterfaceController');
 const verifyToken = require('../middlewares/authMiddleware');
+
+router.get('/getUserPenalties/:profileId', verifyToken, getUserPenalties);
 
 router.post(
   '/addClassUnknownParticipants',
@@ -48,6 +53,10 @@ router.post(
   verifyToken,
   getmemberCourtsByProfileId
 );
+router.post('/penalties/pay', verifyToken, payPenalty);
+
+router.patch('/penalties/updateStatus', verifyToken, updatePenaltyStatus);
+
 router.delete('/cancelMemberCourt', verifyToken, cancelMemberCourt);
 
 module.exports = router;

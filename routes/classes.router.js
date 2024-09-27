@@ -15,6 +15,8 @@ const {
   createPrimaryClasses,
   updateClass,
   updateUserPositions,
+  moveMemberToBookings,
+  moveNonmemberToBookings,
   updateAllClasses,
   updatePrimaryClasses,
   generateClassReport,
@@ -73,6 +75,18 @@ router.post(
   '/waitinglist/updateUserPositions',
   verifyToken,
   updateUserPositions
+);
+
+router.post(
+  '/waitinglist/moveMemberToBookings',
+  verifyToken,
+  moveMemberToBookings
+);
+
+router.post(
+  '/waitinglist/moveNonmemberToBookings',
+  verifyToken,
+  moveNonmemberToBookings
 );
 
 router.post('/updateAllClasses', verifyToken, updateAllClasses);

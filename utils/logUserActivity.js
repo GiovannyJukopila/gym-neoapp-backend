@@ -40,7 +40,6 @@ const logUserActivity = async (
 
     // Obtener la zona horaria del gimnasio
     const gymTimeZone = await getGymTimeZone(gymId);
-    console.log('timestamp : ', timestamp);
 
     // Ajustar la hora al huso horario del gimnasio
     const localTimestamp = getLocalTime(timestamp, gymTimeZone);

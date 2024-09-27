@@ -348,6 +348,7 @@ const createUnknownMember = async (req, res) => {
         role: ['unknownMember'],
         memberType: 'unknownmember',
         profilePicture: req.body.profilePicture,
+        penaltyActive: false,
       };
 
       // Crea el nuevo perfil
@@ -628,7 +629,7 @@ const renewprepaidpackage = async (req, res) => {
     const gymId = body.gymId; // Obtener el ID del gimnasio
     const cardSerialNumber = body.cardSerialNumber; // Obtener el número de serie de la tarjeta
 
-    // Actualizar la información del miembro desconocido en la colección profiles
+    // Referencia a la colección de perfiles
     const profileRef = db.collection('profiles');
     const querySnapshot = await profileRef
       .where('cardSerialNumber', '==', cardSerialNumber)
@@ -637,9 +638,41 @@ const renewprepaidpackage = async (req, res) => {
 
     // Actualizar cada documento encontrado en la consulta
     const batch = db.batch();
+    let currentProfileDoc; // Para almacenar el documento del perfil actualizado
+
     querySnapshot.forEach((doc) => {
+      currentProfileDoc = doc; // Guardar el documento del perfil para usarlo más tarde
       batch.update(doc.ref, body);
     });
+
+    // Si el perfil tiene penaltyActive en true
+    if (currentProfileDoc && currentProfileDoc.data().penaltyActive === true) {
+      // Obtener el crédito actual y el que debe
+      const currentCredit = currentProfileDoc.data().currentCredit || 0;
+      const debtCredit = body.currentCredit || 0; // Créditos que debe según el body
+
+      // Calcular el nuevo crédito después de descontar el crédito de la deuda
+      const updatedCredit = debtCredit + currentCredit;
+
+      // Actualizar el perfil: descontar crédito y desactivar penalización
+      batch.update(currentProfileDoc.ref, {
+        currentCredit: updatedCredit,
+        penaltyActive: false,
+      });
+
+      // Actualizar las penalizaciones activas a inactivas
+      const userPenaltiesRef =
+        currentProfileDoc.ref.collection('userPenalties');
+      const penaltiesSnapshot = await userPenaltiesRef
+        .where('status', '==', 'active')
+        .get();
+
+      penaltiesSnapshot.forEach((penaltyDoc) => {
+        batch.update(penaltyDoc.ref, { status: 'inactive' });
+      });
+    }
+
+    // Confirmar los cambios en la base de datos
     await batch.commit();
 
     // Generar el historial de pagos en la colección paymentHistory
