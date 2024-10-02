@@ -125,6 +125,7 @@ const addClassUnknownParticipants = async (req, res) => {
       profilePicture: profilePicture,
       selectedPackage: selectedPackage,
       cardSerialNumber: cardSerialNumber,
+      attendance: false,
     };
 
     // Obtener referencia a la colección de clases
@@ -430,7 +431,7 @@ const getUnknownMemberCourtsByProfileId = async (req, res) => {
     const courts = [];
     snapshot.forEach((doc) => {
       const courtData = doc.data();
-      // console.log(courtData);
+
       // Verificar si el profileId está en el array de unknownParticipants, si existe
       if (
         courtData.unknownParticipants &&
@@ -971,9 +972,6 @@ const cancelMemberClass = async (req, res) => {
             memberWithCreditFound = true; // Marcar que encontramos a un miembro con crédito
             break; // Salir del ciclo ya que encontramos un miembro con crédito
           } else {
-            console.log(
-              `El miembro con ID ${nextProfileId} no tiene crédito, saltando...`
-            );
             // Si el miembro no tiene crédito, saltarlo y continuar con el siguiente en la lista
             continue;
           }
@@ -1556,6 +1554,323 @@ const updatePenaltyStatus = async (req, res) => {
   }
 };
 
+const penalizeNoShows = async (gymId) => {
+  try {
+    // Obtener la zona horaria del gimnasio
+    const gymTimeZone = await getGymTimeZone(gymId);
+    // Obtener la hora local actual
+    const localNow = getLocalTime(new Date(), gymTimeZone);
+
+    // Calcular la fecha del día anterior
+    const yesterday = new Date(localNow);
+    yesterday.setDate(yesterday.getDate() - 1);
+
+    // Formatear la fecha de ayer para la consulta
+    const formattedYesterday = yesterday.toISOString().split('T')[0]; // "2024-10-01"
+
+    // Filtrar las clases del día anterior en la colección de clases
+    const classesSnapshot = await admin
+      .firestore()
+      .collection('classes')
+      .where('gymId', '==', gymId)
+      .where('eventDate', '>=', formattedYesterday + 'T00:00:00Z')
+      .where('eventDate', '<', formattedYesterday + 'T23:59:59Z')
+      .get();
+
+    for (const gymClass of classesSnapshot.docs) {
+      const primaryClassId = gymClass.data().primaryClassId;
+      const classId = gymClass.data().classId;
+      // Obtener las restricciones de la clase primaria
+      const primaryClassSnapshot = await admin
+        .firestore()
+        .collection('primaryClasses')
+        .doc(primaryClassId)
+        .get();
+
+      const primaryClass = primaryClassSnapshot.data();
+      const memberRestrictions =
+        primaryClass.memberRestrictions?.restrictions || false;
+      const nonMemberRestrictions =
+        primaryClass.nonMemberRestrictions?.restrictions || false;
+
+      // Verificar si hay restricciones activas (para miembros o no miembros)
+      if (memberRestrictions || nonMemberRestrictions) {
+        // Filtrar participantes que no asistieron (attendance: false)
+        const participantsSnapshot = await admin
+          .firestore()
+          .collection('classes')
+          .doc(classId)
+          .collection('participants')
+          .where('attendance', '==', false)
+          .get();
+
+        // Penalizar a cada participante miembro
+        for (const participant of participantsSnapshot.docs) {
+          await applyMemberPenalty(participant.id, primaryClass);
+        }
+
+        // Filtrar participantes no miembros
+        const unknownParticipantsSnapshot = await admin
+          .firestore()
+          .collection('classes')
+          .doc(classId)
+          .collection('unknownParticipants')
+          .where('attendance', '==', false)
+          .get();
+
+        // Penalizar a cada participante no miembro
+        for (const unknownParticipant of unknownParticipantsSnapshot.docs) {
+          await applyNonMemberPenalty(unknownParticipant.id, primaryClass);
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Error al penalizar no shows:', error);
+  }
+};
+
+const applyMemberPenalty = async (participantId, primaryClass) => {
+  const profileRef = admin
+    .firestore()
+    .collection('profiles')
+    .doc(participantId);
+  const profileDoc = await profileRef.get();
+
+  if (!profileDoc.exists) {
+    console.error(`Perfil no encontrado para miembro ${participantId}`);
+    return;
+  }
+
+  const profileData = profileDoc.data();
+  const { first30DaysNoShow = null, noShowCount = 0 } = profileData;
+
+  const gymTimeZone = await getGymTimeZone(primaryClass.gymId);
+  const localNow = getLocalTime(new Date(), gymTimeZone);
+  let first30DaysDate;
+
+  // Manejo de no-shows
+  if (!first30DaysNoShow) {
+    first30DaysDate = localNow;
+    await profileRef.update({ first30DaysNoShow: localNow.toISOString() });
+  } else {
+    first30DaysDate = new Date(first30DaysNoShow);
+  }
+
+  const diffMs = localNow.getTime() - first30DaysDate.getTime();
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  let updatedNoShowCount = noShowCount + 1;
+
+  if (diffDays > 30) {
+    updatedNoShowCount = 1;
+    await profileRef.update({
+      first30DaysNoShow: localNow.toISOString(),
+      noShowCount: updatedNoShowCount,
+    });
+  } else {
+    await profileRef.update({ noShowCount: updatedNoShowCount });
+
+    const maxNoShows = primaryClass.memberRestrictions.maxNoShowPer30Days;
+    const penaltyType = primaryClass.memberRestrictions.penaltyType;
+
+    if (updatedNoShowCount > maxNoShows) {
+      let penaltyAmount = 0;
+      let reason = '';
+
+      if (penaltyType === 'monetary') {
+        penaltyAmount = primaryClass.memberRestrictions.monetaryAmount;
+      } else if (penaltyType === 'timeRestriction') {
+        penaltyAmount = primaryClass.memberRestrictions.timeRestrictionDays;
+      }
+
+      const penaltyDetails = {
+        type: penaltyType,
+        amount: penaltyAmount,
+        reason: `Exceeded the maximum allowed no-shows of ${maxNoShows} within 30 days.`,
+      };
+
+      // Actualizar créditos o penalización
+      await profileRef.update({
+        penaltyActive: true,
+      });
+
+      await logUserPenalty(
+        participantId,
+        primaryClass.gymId,
+        penaltyDetails.type,
+        penaltyDetails,
+        true
+      );
+    }
+  }
+
+  // Registrar la actividad de no-show
+  await logUserActivity(participantId, primaryClass.gymId, 'noShow', [
+    primaryClass.classId,
+  ]);
+};
+
+const applyNonMemberPenalty = async (participantId, primaryClass) => {
+  const profileRef = admin
+    .firestore()
+    .collection('profiles')
+    .doc(participantId);
+  const profileDoc = await profileRef.get();
+
+  if (!profileDoc.exists) {
+    console.error(`Perfil no encontrado para no miembro ${participantId}`);
+    return;
+  }
+
+  const profileData = profileDoc.data();
+  const {
+    noShowCount = 0,
+    first30DaysClassNoShow = null,
+    currentCredit = 0,
+  } = profileData;
+
+  const gymTimeZone = await getGymTimeZone(primaryClass.gymId);
+  const localNow = getLocalTime(new Date(), gymTimeZone);
+  let first30DaysDate;
+
+  // Manejo de No Shows
+  if (!first30DaysClassNoShow) {
+    first30DaysDate = localNow;
+    await profileRef.update({ first30DaysClassNoShow: localNow.toISOString() });
+  } else {
+    first30DaysDate = new Date(first30DaysClassNoShow);
+  }
+
+  const noShowDiffMs = localNow.getTime() - first30DaysDate.getTime();
+  const noShowDiffDays = Math.floor(noShowDiffMs / (1000 * 60 * 60 * 24));
+  let updatedNoShowCount = noShowCount + 1;
+
+  if (noShowDiffDays > 30) {
+    updatedNoShowCount = 1; // Reiniciar el conteo de no shows
+    await profileRef.update({
+      first30DaysClassNoShow: localNow.toISOString(),
+      noShowCount: updatedNoShowCount,
+    });
+  } else {
+    await profileRef.update({ noShowCount: updatedNoShowCount });
+
+    const maxNonMembersNoShows =
+      primaryClass.nonMemberRestrictions.maxNonMembersNoShows;
+    const nonMemberCreditsPenalty =
+      primaryClass.nonMemberRestrictions.nonMemberCreditsPenalty;
+
+    if (updatedNoShowCount > maxNonMembersNoShows) {
+      const penaltyAmount = nonMemberCreditsPenalty;
+      const updatedCredits = currentCredit - penaltyAmount;
+
+      await profileRef.update({
+        currentCredit: updatedCredits,
+        penaltyActive: true,
+      });
+
+      const penaltyDetails = {
+        type: 'creditsPenalty',
+        amount: penaltyAmount,
+        reason: `Exceeded the maximum allowed no shows of ${maxNonMembersNoShows} within 30 days.`,
+      };
+
+      const penaltyStatus = updatedCredits < 0;
+
+      await logUserPenalty(
+        participantId,
+        primaryClass.gymId,
+        penaltyDetails.type,
+        penaltyDetails,
+        penaltyStatus
+      );
+    }
+  }
+
+  // Registrar la actividad de No Show
+  await logUserActivity(participantId, primaryClass.gymId, 'classNoShow', [
+    primaryClass.classId,
+  ]);
+};
+
+const checkAndDeactivatePenalties = async (gymId) => {
+  try {
+    // Obtener la zona horaria del gimnasio
+    const gymTimeZone = await getGymTimeZone(gymId);
+    const currentTime = getLocalTime(new Date(), gymTimeZone); // Hora actual en la zona del gimnasio
+
+    // Obtener todos los perfiles con penalidades activas
+    const profilesSnapshot = await admin
+      .firestore()
+      .collection('profiles')
+      .where('penaltyActive', '==', true)
+      .get();
+
+    for (const profileDoc of profilesSnapshot.docs) {
+      const profileId = profileDoc.id;
+
+      // Obtener penalidades activas del tipo "timeRestriction"
+      const penaltiesSnapshot = await admin
+        .firestore()
+        .collection('profiles')
+        .doc(profileId)
+        .collection('userPenalties')
+        .where('status', '==', 'active')
+        .where('penaltyType', '==', 'timeRestriction')
+        .orderBy('timestamp', 'asc') // Ordenar penalidades por la fecha y hora de creación
+        .get();
+
+      for (const penaltyDoc of penaltiesSnapshot.docs) {
+        const penalty = penaltyDoc.data();
+        const penaltyTimestamp = new Date(penalty.timestamp); // Convertir el string ISO a un objeto Date
+        const penaltyDays = penalty.details.amount; // Días de penalización (en este caso sería 2 días)
+
+        // Calculamos la fecha de expiración de la penalidad
+        const penaltyExpirationDate = new Date(penaltyTimestamp);
+        penaltyExpirationDate.setDate(
+          penaltyExpirationDate.getDate() + penaltyDays
+        );
+
+        // Calcular cuántos días han pasado desde la penalización
+        const daysSincePenalty = Math.floor(
+          (currentTime - penaltyTimestamp) / (1000 * 60 * 60 * 24)
+        );
+
+        // Si han pasado al menos 'penaltyDays' desde que se impuso la penalización, desactivar una penalidad
+        if (daysSincePenalty >= penaltyDays) {
+          await admin
+            .firestore()
+            .collection('profiles')
+            .doc(profileId)
+            .collection('userPenalties')
+            .doc(penaltyDoc.id)
+            .update({ status: 'inactive' });
+
+          // Salir del loop después de desactivar una penalidad
+          break;
+        }
+      }
+
+      // Si ya no quedan penalidades activas, desactivar el campo penaltyActive
+      const remainingActivePenalties = await admin
+        .firestore()
+        .collection('profiles')
+        .doc(profileId)
+        .collection('userPenalties')
+        .where('status', '==', 'active')
+        .get();
+
+      if (remainingActivePenalties.empty) {
+        await admin
+          .firestore()
+          .collection('profiles')
+          .doc(profileId)
+          .update({ penaltyActive: false });
+      }
+    }
+  } catch (error) {
+    console.error('Error al revisar y desactivar penalidades:', error);
+  }
+};
+
 module.exports = {
   getUserPenalties,
   addClassUnknownParticipants,
@@ -1570,4 +1885,6 @@ module.exports = {
   addToUnknownMemberWaitingList,
   payPenalty,
   updatePenaltyStatus,
+  penalizeNoShows,
+  checkAndDeactivatePenalties,
 };

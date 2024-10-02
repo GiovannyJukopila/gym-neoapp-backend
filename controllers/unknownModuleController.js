@@ -573,6 +573,7 @@ const sendUnknownMemberAttendance = async (req, res) => {
           ...profileDetails,
           profileTelephoneNumber: profileDetails.unknownMemberPhoneNumber,
           profileEmail: profileDetails.unknownMemberEmail,
+          attendance: true,
         };
         delete participantDetails.unknownMemberPhoneNumber;
         delete participantDetails.unknownMemberEmail;
@@ -587,6 +588,12 @@ const sendUnknownMemberAttendance = async (req, res) => {
 
         await classDocRef.update({
           currentUnkwnownClassParticipants: currentUnkwnownClassParticipants,
+        });
+      } else {
+        // Si el participante ya existe, actualiza el campo attendance a true
+        const participantDocRef = participantQuery.docs[0].ref;
+        await participantDocRef.update({
+          attendance: true,
         });
       }
     } else {
