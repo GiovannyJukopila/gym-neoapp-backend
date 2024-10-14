@@ -208,22 +208,21 @@ const createClass = async (req, res) => {
 };
 
 async function generateSequentialNumber(gymId) {
-  // Consulta la colección "metadata" para obtener el último número secuencial
   const metadataRef = db.collection('gyms').doc(gymId);
+
+  // Incrementa el valor de gymClasses de forma atómica
+  await metadataRef.update({
+    gymClasses: admin.firestore.FieldValue.increment(1),
+  });
+
+  // Obtener el valor actualizado después de incrementar
   const metadataDoc = await metadataRef.get();
-  let gymClasses = 1;
+  const updatedData = metadataDoc.data();
 
-  if (metadataDoc.exists) {
-    const data = metadataDoc.data();
-    gymClasses = data.gymClasses + 1;
-  }
-
-  // Actualiza el número de secuencia en "metadata"
-  await metadataRef.set({ gymClasses }, { merge: true });
-
-  // Devuelve el número secuencial formateado
-  return gymClasses;
+  // Retorna el número actualizado
+  return updatedData.gymClasses;
 }
+
 const getAllClasses = async (req, res) => {
   try {
     const gymId = req.query.gymId;
