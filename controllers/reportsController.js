@@ -1732,6 +1732,91 @@ const generateWalkinReport = async (req, res) => {
   }
 };
 
+const generatePenaltiesReport = async (req, res) => {
+  const { gymId } = req.params;
+
+  try {
+    // Consultar los perfiles que tengan penaltyActive en true y que pertenezcan al gymId
+    const profilesSnapshot = await db
+      .collection('profiles')
+      .where('gymId', '==', gymId)
+      .where('penaltyActive', '==', true)
+      .get();
+
+    // Extraer los datos relevantes de cada perfil
+    const profiles = profilesSnapshot.docs.map((doc) => {
+      const data = doc.data();
+      return {
+        profileName: data.profileName,
+        profileLastname: data.profileLastname,
+        cardSerialNumber: data.cardSerialNumber,
+      };
+    });
+
+    // Obtener la información del gimnasio para la zona horaria
+    const gymSnapshot = await admin
+      .firestore()
+      .collection('gyms')
+      .doc(gymId)
+      .get();
+    const gymData = gymSnapshot.data();
+    const gymTimeZone = gymData.gymTimeZone;
+    const utcOffset = getUtcOffset(gymTimeZone);
+
+    const utcDate = new Date();
+    const localTimeInMilliseconds = utcDate.getTime() - utcOffset * 60 * 1000;
+    const currentDate = new Date(localTimeInMilliseconds);
+    currentDate.setUTCHours(0, 0, 0, 0);
+
+    const dateString = currentDate.toISOString().split('T')[0];
+
+    // Crear un nuevo documento PDF
+    const doc = new PDFDocument();
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Disposition',
+      'inline; filename="penalties_report.pdf"'
+    );
+    doc.pipe(res);
+
+    // Encabezado del documento
+    doc.rect(0, 0, 612, 80).fill('#FFA500');
+    doc
+      .fontSize(25)
+      .fill('white')
+      .text('PENALTIES REPORT', 50, 30, { align: 'left', valign: 'center' });
+
+    doc.fontSize(18).text(`${dateString}`, { bold: true });
+
+    doc
+      .moveDown(1)
+      .fill('#0000')
+      .text(`Total Members with Penalties: ${profiles.length}`, {
+        fontSize: 14,
+        bold: true,
+      })
+      .moveDown(1);
+
+    // Crear la tabla en el PDF
+    doc.table({
+      headers: ['First Name', 'Last Name', 'Card Serial Number'],
+      rows: profiles.map((profile) => [
+        profile.profileName,
+        profile.profileLastname,
+        profile.cardSerialNumber,
+      ]),
+      fontSize: 12,
+      width: { 0: 200, 1: 200, 2: 150 },
+    });
+
+    // Finalizar el documento
+    doc.end();
+  } catch (error) {
+    console.error(error);
+    res.status(500).send('Error generating the penalties report');
+  }
+};
+
 module.exports = {
   generateGlobalReport,
   generateReportByMembership,
@@ -1741,4 +1826,5 @@ module.exports = {
   generateInactiveMembersReport,
   generateDnaReport,
   generateWalkinReport,
+  generatePenaltiesReport,
 };

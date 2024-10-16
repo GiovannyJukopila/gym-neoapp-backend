@@ -8,6 +8,7 @@ const {
   generateInactiveMembersReport,
   generateDnaReport,
   generateWalkinReport,
+  generatePenaltiesReport,
 } = require('../controllers/reportsController');
 const verifyToken = require('../middlewares/authMiddleware');
 
@@ -34,5 +35,10 @@ router.post(
   generateExpirationReport
 );
 router.post('/generateWalkinReport/:gymId', verifyToken, generateWalkinReport);
+router.post(
+  '/generatePenaltiesReport/:gymId',
+  verifyToken,
+  generatePenaltiesReport
+);
 
 module.exports = router;
