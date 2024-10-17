@@ -32,7 +32,7 @@ const createClass = async (req, res) => {
 
     if (body.expirationDate !== null) {
       const expirationDate = new Date(body.expirationDate);
-      const gymClassSerialNumber = await generateSequentialNumber(gymId);
+      const gymClassSerialNumber = await generateClassSequentialNumber(gymId);
       const personalClassId = `personal-class-${gymId}-${gymClassSerialNumber}-${
         eventDate.toISOString().split('T')[0]
       }-${expirationDate.toISOString().split('T')[0]}`;
@@ -42,7 +42,7 @@ const createClass = async (req, res) => {
       while (currentDate <= expirationDate) {
         const dayOfWeek = currentDate.getDay();
         if (body.selectedWeekDays.includes(dayOfWeek)) {
-          const classSerialNumber = await generateSequentialNumber(gymId);
+          const classSerialNumber = await generateClassSequentialNumber(gymId);
           const classId = `class-${gymId}-${classSerialNumber}`;
 
           const classObj = {
@@ -73,7 +73,7 @@ const createClass = async (req, res) => {
 
       const expirationDayOfWeek = expirationDate.getDay();
       if (body.selectedWeekDays.includes(expirationDayOfWeek)) {
-        const expirationClassSerialNumber = await generateSequentialNumber(
+        const expirationClassSerialNumber = await generateClassSequentialNumber(
           gymId
         );
         const expirationClassId = `class-${gymId}-${expirationClassSerialNumber}`;
@@ -125,13 +125,13 @@ const createClass = async (req, res) => {
         classes: classes,
       });
     } else if (body.selectedWeekDays && body.selectedWeekDays.length > 0) {
-      const gymClassSerialNumber = await generateSequentialNumber(gymId);
+      const gymClassSerialNumber = await generateClassSequentialNumber(gymId);
       const personalClassId = `personal-class-${gymId}-${gymClassSerialNumber}-${
         eventDate.toISOString().split('T')[0]
       }`;
 
       for (const dayOfWeek of body.selectedWeekDays) {
-        const classSerialNumber = await generateSequentialNumber(gymId);
+        const classSerialNumber = await generateClassSequentialNumber(gymId);
         const classId = `class-${gymId}-${classSerialNumber}`;
 
         const classObj = {
@@ -178,7 +178,7 @@ const createClass = async (req, res) => {
         classes: classes,
       });
     } else {
-      const classSerialNumber = await generateSequentialNumber(gymId);
+      const classSerialNumber = await generateClassSequentialNumber(gymId);
       const documentName = `class-${gymId}-${classSerialNumber}`;
       body.classId = documentName;
 
@@ -207,7 +207,7 @@ const createClass = async (req, res) => {
   }
 };
 
-async function generateSequentialNumber(gymId) {
+async function generateClassSequentialNumber(gymId) {
   const metadataRef = db.collection('gyms').doc(gymId);
 
   // Incrementa el valor de gymClasses de forma atómica
