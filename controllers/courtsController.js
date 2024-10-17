@@ -1139,9 +1139,9 @@ const deleteSession = async (req, res) => {
 
       if (metadataDoc.exists) {
         const data = metadataDoc.data();
-        const gymClasses = data.gymSessions - 1;
+        const gymSessions = data.gymSessions - 1;
 
-        await metadataRef.update({ gymClasses });
+        await metadataRef.update({ gymSessions });
       }
     }
 
