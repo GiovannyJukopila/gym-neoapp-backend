@@ -1348,6 +1348,8 @@ const generateDnaReport = async (req, res) => {
       margins: { top: 20, bottom: 20, left: 50, right: 50 },
     });
 
+    doc.addPage();
+
     const checkInOutData = await getCheckInOutData(profileId);
     const checkInOutTable = {
       headers: ['Index', 'Date', 'Check-In', 'Check-Out'],
@@ -1385,6 +1387,7 @@ const generateDnaReport = async (req, res) => {
     res.status(500).send('Error generating the report');
   }
 };
+
 // Función para obtener los datos de CheckIn/CheckOut
 async function getCheckInOutData(profileId) {
   const accessSnapshot = await admin
