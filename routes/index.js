@@ -18,6 +18,7 @@ const supportRouter = require('./support.router');
 const unknownModuleRouter = require('./unknownModule.router');
 const usersInterfaceRouter = require('./usersInterface.router');
 const pushNotificationRouter = require('./pushNotification.router');
+const internetConnectionRouter = require('./internetConnection.router');
 
 const router = express.Router();
 //app.use('/api/v1', router);
@@ -39,5 +40,6 @@ router.use('/support', supportRouter);
 router.use('/unknownModule', unknownModuleRouter);
 router.use('/users', usersInterfaceRouter);
 router.use('/pushNotification', pushNotificationRouter);
+router.use('/internetConnection', internetConnectionRouter);
 
 module.exports = router;
