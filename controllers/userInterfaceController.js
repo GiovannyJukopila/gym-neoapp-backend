@@ -135,6 +135,15 @@ const addClassUnknownParticipants = async (req, res) => {
     // Verificar si la clase existe
     const classDoc = await classDocRef.get();
 
+    const classData = classDoc.data();
+
+    // Validar que classCapacity no sea 0
+    if (classData.unknownClassCapacity === 0) {
+      return res.status(400).json({
+        message: 'No slots available for this class',
+      });
+    }
+
     // Si la clase no existe, crear un nuevo documento con el contador de participantes inicializado en 1
     if (!classDoc.exists) {
       await classDocRef.set({
@@ -232,6 +241,15 @@ const addClassParticipants = async (req, res) => {
 
     // Verificar si la clase existe
     const classDoc = await classDocRef.get();
+
+    const classData = classDoc.data();
+
+    // Validar que classCapacity no sea 0
+    if (classData.classCapacity === 0) {
+      return res.status(400).json({
+        message: 'No slots available for this class',
+      });
+    }
 
     if (!classDoc.exists) {
       // Si la clase no existe, crear un nuevo documento y la subcolección de participantes
