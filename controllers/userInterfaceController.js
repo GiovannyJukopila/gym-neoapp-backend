@@ -207,6 +207,17 @@ const addClassParticipants = async (req, res) => {
     }
     const profileDoc = profileSnapshot.data();
 
+    // Verificar si el perfil está congelado o tiene el estado en 'false'
+    if (
+      profileDoc.profileFrozen === true ||
+      profileDoc.profileStatus === 'false'
+    ) {
+      return res.status(403).json({
+        message:
+          'You cannot book this class because your profile is frozen or your membership Expired.',
+      });
+    }
+
     const penaltiesSnapshot = await db
       .collection('profiles')
       .doc(profileId)
@@ -308,6 +319,124 @@ const addClassParticipants = async (req, res) => {
       .json({ message: 'Internal server error while adding participant' });
   }
 };
+
+// const addClassParticipants = async (req, res) => {
+//   try {
+//     const classId = req.body.classId;
+//     const profileId = req.body.profileId;
+
+//     // Obtener el perfil del usuario
+//     const profileSnapshot = await db
+//       .collection('profiles')
+//       .doc(profileId)
+//       .get();
+
+//     if (!profileSnapshot.exists) {
+//       return res.status(404).json({ message: 'Profile not found' });
+//     }
+//     const profileDoc = profileSnapshot.data();
+
+//     const penaltiesSnapshot = await db
+//       .collection('profiles')
+//       .doc(profileId)
+//       .collection('userPenalties')
+//       .where('status', '==', 'active')
+//       .get();
+
+//     if (!penaltiesSnapshot.empty) {
+//       return res.status(403).json({
+//         message:
+//           'You cannot book this class due to an active penalty. Please contact reception.',
+//       });
+//     }
+
+//     // Generar el código QR para el participante
+//     const qrData = `${profileDoc.profileId},${classId}`;
+//     const qrCode = await generateQRCode(qrData);
+
+//     const participant = {
+//       profileId: profileDoc.profileId,
+//       profileEmail: profileDoc.profileEmail,
+//       profileTelephoneNumber: profileDoc.profileTelephoneNumber,
+//       profileName: profileDoc.profileName,
+//       profilePicture: profileDoc.profilePicture,
+//       cardSerialNumber: profileDoc.cardSerialNumber,
+//       attendance: false,
+//       qrCode: qrCode, // Añadir el código QR al participante
+//     };
+
+//     // Obtener la referencia a la colección de clases
+//     const classDocRef = db.collection('classes').doc(classId);
+
+//     // Verificar si la clase existe
+//     const classDoc = await classDocRef.get();
+
+//     const classData = classDoc.data();
+
+//     // Validar que classCapacity no sea 0
+//     if (classData.classCapacity === 0) {
+//       return res.status(400).json({
+//         message: 'No slots available for this class',
+//       });
+//     }
+
+//     if (!classDoc.exists) {
+//       // Si la clase no existe, crear un nuevo documento y la subcolección de participantes
+//       await classDocRef.set({
+//         currentClassParticipants: 1,
+//       });
+
+//       // Crear la subcolección de participantes y añadir el participante
+//       await classDocRef
+//         .collection('participants')
+//         .doc(profileId)
+//         .set(participant);
+
+//       return res.status(200).json({
+//         message: 'Participant added successfully',
+//         currentClassParticipants: 1,
+//       });
+//     }
+
+//     // Verificar si el participante ya está en la subcolección
+//     const participantDocRef = classDocRef
+//       .collection('participants')
+//       .doc(profileId);
+//     const participantDoc = await participantDocRef.get();
+
+//     if (participantDoc.exists) {
+//       return res
+//         .status(400)
+//         .json({ message: 'You are already a participant in this class' });
+//     }
+
+//     // Añadir el participante a la subcolección y actualizar el conteo
+//     const batch = db.batch();
+//     batch.set(participantDocRef, participant);
+
+//     // Actualizar el número de participantes en el documento de la clase
+//     const currentClassParticipantsSnapshot = await classDocRef
+//       .collection('participants')
+//       .get();
+//     const currentClassParticipants = currentClassParticipantsSnapshot.size + 1;
+
+//     batch.update(classDocRef, {
+//       currentClassParticipants: currentClassParticipants,
+//     });
+
+//     await batch.commit();
+
+//     return res.status(200).json({
+//       message: 'Successfully added to the class.',
+//       currentClassParticipants: currentClassParticipants,
+//     });
+//   } catch (error) {
+//     console.error('Error adding participant:', error);
+//     return res
+//       .status(500)
+//       .json({ message: 'Internal server error while adding participant' });
+//   }
+// };
 
 const generateQRCode = async (qrData) => {
   try {
