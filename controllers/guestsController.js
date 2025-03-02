@@ -62,6 +62,7 @@ const getAllGuests = async (req, res) => {
     const gymId = req.query.gymId; // Obtén el gymId de los parámetros de la consulta
     const offset = parseInt(req.query.offset) || 0;
     const itemsPerPage = parseInt(req.query.itemsPerPage) || 4;
+
     // Verifica si se proporcionó el parámetro gymId
     if (!gymId) {
       return res
@@ -71,9 +72,11 @@ const getAllGuests = async (req, res) => {
 
     const guestsRef = db.collection('guests');
 
-    // Realiza la consulta para obtener todos los invitados con el gymId proporcionado
+    // Realiza la consulta para obtener todos los invitados con el gymId proporcionado,
+    // ordenados por currentDate (descendente) para obtener los más recientes primero
     const guestsSnapshot = await guestsRef
       .where('gymId', '==', gymId)
+      .orderBy('currentDate', 'desc') // Ordenar por currentDate de forma descendente
       .limit(itemsPerPage)
       .offset(offset)
       .get();
@@ -84,7 +87,6 @@ const getAllGuests = async (req, res) => {
       const guestData = {
         guestId: doc.id,
         ...doc.data(),
-        // Aplicar formatDate a currentDate
       };
       guestsData.push(guestData);
     });

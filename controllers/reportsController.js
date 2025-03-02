@@ -7,6 +7,354 @@ const { format } = require('date-fns');
 
 const ExcelJS = require('exceljs');
 
+const generateGymVisitReport = async (req, res) => {
+  try {
+    const { gymId } = req.params;
+    const doc = new PDFDocument({ size: 'A4', margin: 50 });
+
+    res.setHeader(
+      'Content-Disposition',
+      'attachment; filename="Gym_Visit_Report.pdf"'
+    );
+    res.setHeader('Content-Type', 'application/pdf');
+    doc.pipe(res);
+
+    // 🔹 Obtener información del gym
+    const gymSnapshot = await admin
+      .firestore()
+      .collection('gyms')
+      .doc(gymId)
+      .get();
+    const gymData = gymSnapshot.data();
+    const gymName = gymData?.gymName || 'Unknown Gym';
+
+    // 🔹 Obtener estadísticas de visitas
+    const {
+      summaryTableData,
+      totalVisits,
+      startDate,
+      dayWithMostVisits,
+      visitPercentagesByDay,
+    } = await getGymVisitStatistics(gymId);
+
+    // 🔥 Encabezado del reporte
+    doc.rect(0, 0, 612, 80).fill('#007BFF'); // Azul corporativo
+    doc
+      .fillColor('white')
+      .fontSize(25)
+      .text('GYM VISIT REPORT', 50, 30, { align: 'left' });
+
+    // 📌 Nombre del gym y fecha
+    const today = new Date();
+    const dateString = today.toISOString().split('T')[0];
+
+    doc
+      .fontSize(18)
+      .text(`${gymName} - Report Date: ${dateString}`, { bold: true });
+
+    doc.moveDown(2);
+    doc
+      .fillColor('black')
+      .fontSize(14)
+      .text(`Evaluation Period: ${startDate} - ${dateString}`, { bold: true });
+
+    doc.moveDown(1);
+    doc.fontSize(14).text(`Total Visits: ${totalVisits}`, { bold: true });
+
+    doc.moveDown(1);
+    doc.fontSize(14).text(`Busiest Day: ${dayWithMostVisits}`, { bold: true });
+
+    doc.moveDown(2);
+
+    // 📊 Agregar la tabla de estadísticas generales
+    doc.fontSize(14).text('General Statistics:', { bold: true });
+    doc.moveDown(1);
+
+    // 📊 Crear la tabla con los promedios de visitas y tiempos
+    const generalStatsTable = {
+      headers: ['Statistic', 'Value'],
+      rows: summaryTableData,
+    };
+
+    // 📊 Tabla de promedios ocupando todo el ancho disponible
+    doc.table(generalStatsTable, { width: 510, x: 50, y: doc.y });
+
+    doc.moveDown(2);
+
+    // 📈 Agregar tabla de visitas por día de la semana
+    doc
+      .fontSize(14)
+      .text('Visits by Day of the Week (Percentages):', { bold: true });
+    doc.moveDown(1);
+
+    // Crear la tabla de porcentajes de visitas
+    const tableData = Object.entries(visitPercentagesByDay).map(
+      ([day, percentage]) => ({
+        day,
+        percentage: `${percentage}%`,
+      })
+    );
+
+    const table = {
+      headers: ['Day', 'Visit Percentage'],
+      rows: tableData.map((item) => [item.day, item.percentage]),
+    };
+
+    doc.table(table, { width: 250, x: 50, y: doc.y });
+
+    doc.end();
+  } catch (error) {
+    console.error(error);
+    res.status(500).send('Error generating the report');
+  }
+};
+
+async function getGymVisitStatistics(gymId) {
+  try {
+    let totalVisits = 0;
+    let morningVisits = 0,
+      afternoonVisits = 0,
+      eveningVisits = 0;
+    let morningTimeSum = 0,
+      afternoonTimeSum = 0,
+      eveningTimeSum = 0;
+    let visitDays = {}; // Para contar visitas por día de la semana
+
+    // Fecha de inicio (hace 1 año)
+    const oneYearAgo = new Date();
+    oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1); // Restamos 1 año
+    const startDate = oneYearAgo.toISOString().split('T')[0]; // Formato YYYY-MM-DD
+
+    const accessSnapshot = await admin
+      .firestore()
+      .collection('accessHistory')
+      .where('gymId', '==', gymId)
+      .where('action', '==', 'check-in')
+      .where('timestamp', '>=', oneYearAgo) // Cambié esta línea
+      .get();
+
+    accessSnapshot.forEach((doc) => {
+      const timestamp = doc.data().timestamp.toDate();
+      const hours = timestamp.getHours();
+      const minutes = timestamp.getMinutes();
+      const timeInMinutes = hours * 60 + minutes;
+      const dayOfWeek = timestamp.toLocaleDateString('en-US', {
+        weekday: 'long',
+      });
+
+      // Contar visitas por día de la semana
+      visitDays[dayOfWeek] = (visitDays[dayOfWeek] || 0) + 1;
+
+      // Clasificar las visitas en franjas horarias
+      if (hours >= 5 && hours < 12) {
+        morningVisits++;
+        morningTimeSum += timeInMinutes;
+      } else if (hours >= 12 && hours < 18) {
+        afternoonVisits++;
+        afternoonTimeSum += timeInMinutes;
+      } else {
+        eveningVisits++;
+        eveningTimeSum += timeInMinutes;
+      }
+
+      totalVisits++;
+    });
+
+    // Calcular porcentajes de visitas por franja horaria
+    const morningPercentage = totalVisits
+      ? ((morningVisits / totalVisits) * 100).toFixed(2)
+      : '0.00';
+    const afternoonPercentage = totalVisits
+      ? ((afternoonVisits / totalVisits) * 100).toFixed(2)
+      : '0.00';
+    const eveningPercentage = totalVisits
+      ? ((eveningVisits / totalVisits) * 100).toFixed(2)
+      : '0.00';
+
+    // Calcular la hora promedio de cada franja horaria
+    const calculateAverageTime = (timeSum, totalVisits) => {
+      if (totalVisits === 0) return 'N/A';
+      const avgMinutes = Math.floor(timeSum / totalVisits);
+      const avgHours = Math.floor(avgMinutes / 60);
+      const remainingMinutes = avgMinutes % 60;
+      return `${avgHours.toString().padStart(2, '0')}:${remainingMinutes
+        .toString()
+        .padStart(2, '0')}`;
+    };
+
+    const morningAverageTime = calculateAverageTime(
+      morningTimeSum,
+      morningVisits
+    );
+    const afternoonAverageTime = calculateAverageTime(
+      afternoonTimeSum,
+      afternoonVisits
+    );
+    const eveningAverageTime = calculateAverageTime(
+      eveningTimeSum,
+      eveningVisits
+    );
+
+    // Calcular porcentajes de visitas por día de la semana
+    const visitPercentagesByDay = Object.fromEntries(
+      Object.entries(visitDays).map(([day, count]) => [
+        day,
+        ((count / totalVisits) * 100).toFixed(2),
+      ])
+    );
+
+    // Obtener el día con más visitas
+    const dayWithMostVisits = Object.entries(visitDays).reduce(
+      (a, b) => (b[1] > a[1] ? b : a),
+      ['None', 0]
+    )[0];
+
+    return {
+      totalVisits,
+      startDate,
+      dayWithMostVisits,
+      visitPercentagesByDay,
+      summaryTableData: [
+        ['Average Morning Visit (Opening - 12:00 PM)', `${morningPercentage}%`],
+        [
+          'Average Afternoon Visit (12:00 PM - 6:00 PM)',
+          `${afternoonPercentage}%`,
+        ],
+        ['Average Evening Visit (6:00 PM - Closing)', `${eveningPercentage}%`],
+        ['Average time of morning visits', morningAverageTime],
+        ['Average time of afternoon visits', afternoonAverageTime],
+        ['Average time of evening visits', eveningAverageTime],
+      ],
+    };
+  } catch (error) {
+    console.error('Error fetching gym visit statistics:', error);
+    return null;
+  }
+}
+
+// async function getGymVisitStatistics(gymId) {
+//   try {
+//     let totalVisits = 0;
+//     let morningVisits = 0,
+//       afternoonVisits = 0,
+//       eveningVisits = 0;
+//     let morningTimeSum = 0,
+//       afternoonTimeSum = 0,
+//       eveningTimeSum = 0;
+//     let visitDays = {}; // Para contar visitas por día de la semana
+
+//     // Fecha de inicio (hace 6 meses)
+//     const sixMonthsAgo = new Date();
+//     sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+//     const startDate = sixMonthsAgo.toISOString().split('T')[0];
+
+//     const accessSnapshot = await admin
+//       .firestore()
+//       .collection('accessHistory')
+//       .where('gymId', '==', gymId)
+//       .where('action', '==', 'check-in')
+//       .where('timestamp', '>=', sixMonthsAgo)
+//       .get();
+
+//     accessSnapshot.forEach((doc) => {
+//       const timestamp = doc.data().timestamp.toDate();
+//       const hours = timestamp.getHours();
+//       const minutes = timestamp.getMinutes();
+//       const timeInMinutes = hours * 60 + minutes;
+//       const dayOfWeek = timestamp.toLocaleDateString('en-US', {
+//         weekday: 'long',
+//       });
+
+//       // Contar visitas por día de la semana
+//       visitDays[dayOfWeek] = (visitDays[dayOfWeek] || 0) + 1;
+
+//       // Clasificar las visitas en franjas horarias
+//       if (hours >= 5 && hours < 12) {
+//         morningVisits++;
+//         morningTimeSum += timeInMinutes;
+//       } else if (hours >= 12 && hours < 18) {
+//         afternoonVisits++;
+//         afternoonTimeSum += timeInMinutes;
+//       } else {
+//         eveningVisits++;
+//         eveningTimeSum += timeInMinutes;
+//       }
+
+//       totalVisits++;
+//     });
+
+//     // Calcular porcentajes de visitas por franja horaria
+//     const morningPercentage = totalVisits
+//       ? ((morningVisits / totalVisits) * 100).toFixed(2)
+//       : '0.00';
+//     const afternoonPercentage = totalVisits
+//       ? ((afternoonVisits / totalVisits) * 100).toFixed(2)
+//       : '0.00';
+//     const eveningPercentage = totalVisits
+//       ? ((eveningVisits / totalVisits) * 100).toFixed(2)
+//       : '0.00';
+
+//     // Calcular la hora promedio de cada franja horaria
+//     const calculateAverageTime = (timeSum, totalVisits) => {
+//       if (totalVisits === 0) return 'N/A';
+//       const avgMinutes = Math.floor(timeSum / totalVisits);
+//       const avgHours = Math.floor(avgMinutes / 60);
+//       const remainingMinutes = avgMinutes % 60;
+//       return `${avgHours.toString().padStart(2, '0')}:${remainingMinutes
+//         .toString()
+//         .padStart(2, '0')}`;
+//     };
+
+//     const morningAverageTime = calculateAverageTime(
+//       morningTimeSum,
+//       morningVisits
+//     );
+//     const afternoonAverageTime = calculateAverageTime(
+//       afternoonTimeSum,
+//       afternoonVisits
+//     );
+//     const eveningAverageTime = calculateAverageTime(
+//       eveningTimeSum,
+//       eveningVisits
+//     );
+
+//     // Calcular porcentajes de visitas por día de la semana
+//     const visitPercentagesByDay = Object.fromEntries(
+//       Object.entries(visitDays).map(([day, count]) => [
+//         day,
+//         ((count / totalVisits) * 100).toFixed(2),
+//       ])
+//     );
+
+//     // Obtener el día con más visitas
+//     const dayWithMostVisits = Object.entries(visitDays).reduce(
+//       (a, b) => (b[1] > a[1] ? b : a),
+//       ['None', 0]
+//     )[0];
+
+//     return {
+//       totalVisits,
+//       startDate,
+//       dayWithMostVisits,
+//       visitPercentagesByDay,
+//       summaryTableData: [
+//         ['Average Morning Visit (Opening - 12:00 PM)', `${morningPercentage}%`],
+//         [
+//           'Average Afternoon Visit (12:00 PM - 6:00 PM)',
+//           `${afternoonPercentage}%`,
+//         ],
+//         ['Average Evening Visit (6:00 PM - Closing)', `${eveningPercentage}%`],
+//         ['Average time of morning visits', morningAverageTime],
+//         ['Average time of afternoon visits', afternoonAverageTime],
+//         ['Average time of evening visits', eveningAverageTime],
+//       ],
+//     };
+//   } catch (error) {
+//     console.error('Error fetching gym visit statistics:', error);
+//     return null;
+//   }
+// }
+
 const getLocalTime = (currentDateTime, gymTimeZone) => {
   const offsetMatch = /UTC([+-]?\d*\.?\d*)/.exec(gymTimeZone);
   if (offsetMatch) {
@@ -1830,4 +2178,5 @@ module.exports = {
   generateDnaReport,
   generateWalkinReport,
   generatePenaltiesReport,
+  generateGymVisitReport,
 };
