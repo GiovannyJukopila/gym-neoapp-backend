@@ -1026,6 +1026,87 @@ const searchKnownMemberByCardNumber = async (req, res) => {
   }
 };
 
+// const searchProfile = async (req, res) => {
+//   try {
+//     let searchTerm = req.query.term; // Obtén el término de búsqueda y elimina espacios adicionales
+//     searchTerm = searchTerm.charAt(0).toUpperCase() + searchTerm.slice(1);
+
+//     const gymId = req.query.gymId;
+
+//     let profiles = [];
+
+//     const profilesRef = db.collection('profiles');
+
+//     if (searchTerm.includes(' ')) {
+//       const [firstName, ...lastNameArr] = searchTerm.split(' ');
+//       const lastName = lastNameArr.join(' ');
+
+//       const nameSnapshot = await profilesRef
+//         .where('gymId', '==', gymId)
+//         .where('role', 'array-contains', 'member')
+//         .where('profileName', '==', `${firstName} ${lastName}`)
+//         .get();
+
+//       nameSnapshot.forEach((doc) => {
+//         const profile = doc.data();
+//         // Verificar si el perfil está congelado o inactivo
+//         if (
+//           profile.profileFrozen !== true &&
+//           profile.profileStatus !== 'false'
+//         ) {
+//           profiles.push(profile);
+//         }
+//       });
+
+//       const lastNameSnapshot = await profilesRef
+//         .where('gymId', '==', gymId)
+//         .where('role', 'array-contains', 'member')
+//         .where('profileLastname', '==', lastName)
+//         .get();
+
+//       lastNameSnapshot.forEach((doc) => {
+//         const profile = doc.data();
+//         // Verificar si el perfil está congelado o inactivo
+//         if (
+//           profile.profileFrozen !== true &&
+//           profile.profileStatus !== 'false'
+//         ) {
+//           profiles.push(profile);
+//         }
+//       });
+//     } else {
+//       const snapshot = await profilesRef
+//         .where('gymId', '==', gymId)
+//         .where('role', 'array-contains', 'member')
+//         .where('profileName', '>=', searchTerm)
+//         .where('profileName', '<=', searchTerm + '\uf8ff')
+//         .get();
+
+//       snapshot.forEach((doc) => {
+//         const profile = doc.data();
+//         // Verificar si el perfil está congelado o inactivo
+//         if (
+//           profile.profileFrozen !== true &&
+//           profile.profileStatus !== 'false'
+//         ) {
+//           profiles.push(profile);
+//         }
+//       });
+//     }
+
+//     if (profiles.length === 0) {
+//       res.status(404).json({ message: 'Perfiles no encontrados' });
+//     } else {
+//       res.json(profiles);
+//     }
+//   } catch (error) {
+//     console.error('Error al buscar perfiles por término de búsqueda:', error);
+//     res.status(500).json({
+//       error: 'Error al buscar perfiles por término de búsqueda',
+//     });
+//   }
+// };
+
 const searchProfile = async (req, res) => {
   try {
     let searchTerm = req.query.term; // Obtén el término de búsqueda y elimina espacios adicionales
@@ -1048,14 +1129,7 @@ const searchProfile = async (req, res) => {
         .get();
 
       nameSnapshot.forEach((doc) => {
-        const profile = doc.data();
-        // Verificar si el perfil está congelado o inactivo
-        if (
-          profile.profileFrozen !== true &&
-          profile.profileStatus !== 'false'
-        ) {
-          profiles.push(profile);
-        }
+        profiles.push(doc.data());
       });
 
       const lastNameSnapshot = await profilesRef
@@ -1065,32 +1139,18 @@ const searchProfile = async (req, res) => {
         .get();
 
       lastNameSnapshot.forEach((doc) => {
-        const profile = doc.data();
-        // Verificar si el perfil está congelado o inactivo
-        if (
-          profile.profileFrozen !== true &&
-          profile.profileStatus !== 'false'
-        ) {
-          profiles.push(profile);
-        }
+        profiles.push(doc.data());
       });
     } else {
       const snapshot = await profilesRef
         .where('gymId', '==', gymId)
         .where('role', 'array-contains', 'member')
         .where('profileName', '>=', searchTerm)
-        .where('profileName', '<=', searchTerm + '\uf8ff')
+        .where('profileName', '<=', searchTerm + '\\uf8ff')
         .get();
 
       snapshot.forEach((doc) => {
-        const profile = doc.data();
-        // Verificar si el perfil está congelado o inactivo
-        if (
-          profile.profileFrozen !== true &&
-          profile.profileStatus !== 'false'
-        ) {
-          profiles.push(profile);
-        }
+        profiles.push(doc.data());
       });
     }
 
