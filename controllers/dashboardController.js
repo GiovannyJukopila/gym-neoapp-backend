@@ -301,13 +301,21 @@ const getPaymentReport = async (req, res) => {
       const paymentType = doc.data().paymentType;
       let paymentDate;
 
-      if (paymentType === 'new') {
+      if (paymentType === 'new' || paymentType === 'prepaidPackage') {
         paymentDate = new Date(doc.data().paymentDate).getTime() + utcOffset;
       } else if (paymentType === 'renew') {
         paymentDate = new Date(doc.data().renewDate).getTime() + utcOffset;
       } else {
         return;
       }
+
+      // if (paymentType === 'new') {
+      //   paymentDate = new Date(doc.data().paymentDate).getTime() + utcOffset;
+      // } else if (paymentType === 'renew') {
+      //   paymentDate = new Date(doc.data().renewDate).getTime() + utcOffset;
+      // } else {
+      //   return;
+      // }
 
       if (
         paymentDate >= now.getTime() - 7 * 24 * 60 * 60 * 1000 &&
