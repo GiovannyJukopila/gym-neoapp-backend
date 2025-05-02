@@ -97,7 +97,8 @@ const sendEmailToPay = async (req, res) => {
 
     const adminEmail = {
       from: '"No Reply - NeoApp" <no-reply@neoappgym.com>',
-      to: 'goneoapp@gmail.com',
+      to: 'info@neo-app.eu',
+      bcc: 'goneoapp@gmail.com',
       subject: `New Order #${orderId} - €${total.toFixed(2)}`,
       html: generateAdminEmail(orderId, transactionData),
     };
