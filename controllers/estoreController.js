@@ -302,79 +302,78 @@ const getProducts = async (req, res) => {
 };
 
 const getMobileProductsByTarget = async (req, res) => {
-  const { page, limit, target } = req.query; // Obtenemos 'page', 'limit' y 'target' desde los parámetros de la consulta
-  const gymId = req.query.gymId; // Se espera que el gymId venga en la query
+  const { page, limit, target, category, gymId } = req.query;
 
   if (!gymId) {
     return res.status(400).json({ error: 'Gym ID is required' });
   }
 
-  // Asegúrate de que 'target' tenga un valor válido
-  if (!target || !['Men', 'Women', 'Unisex'].includes(target)) {
+  if (!target) {
+    return res.status(400).json({ error: 'Target is required' });
+  }
+
+  if (target !== 'All' && !['Men', 'Women', 'Unisex'].includes(target)) {
     return res
       .status(400)
-      .json({ error: 'Target must be Men, Women, or Unisex' });
+      .json({ error: 'Target must be All, Men, Women, or Unisex' });
+  }
+
+  if (!category) {
+    return res.status(400).json({ error: 'Category is required' });
   }
 
   try {
-    const pageNum = parseInt(page) || 1; // Si no se proporciona, por defecto es la página 1
-    const limitNum = parseInt(limit) || 10; // Si no se proporciona, por defecto es 10 productos por página
-
+    const pageNum = parseInt(page) || 1;
+    const limitNum = parseInt(limit) || 10;
     const offset = (pageNum - 1) * limitNum;
 
-    // Primero, obtenemos los productos visibles (isVisible: true) desde la colección 'products' del gimnasio
     const gymProductsRef = admin
       .firestore()
       .collection('gyms')
       .doc(gymId)
-      .collection('products'); // Subcolección de productos del gimnasio
+      .collection('products');
 
-    // Obtenemos los productos visibles (isVisible: true) y que coincidan con el target
+    // Obtenemos solo productos visibles
     const visibleProductsSnapshot = await gymProductsRef
-      .where('isVisible', '==', true) // Filtramos solo los productos visibles
+      .where('isVisible', '==', true)
       .get();
 
     if (visibleProductsSnapshot.empty) {
       return res.status(404).json({
-        message: 'No visible products found for the selected target.',
+        message: 'No visible products found.',
       });
     }
 
-    // Extraemos los IDs de los productos visibles
     const productIds = visibleProductsSnapshot.docs.map((doc) => doc.id);
 
-    // Ahora consultamos la colección 'products' para obtener los detalles completos de los productos visibles y el target
+    // Referencia a colección principal
     const productsRef = admin.firestore().collection('products');
-    const productsSnapshot = await productsRef
-      .where(admin.firestore.FieldPath.documentId(), 'in', productIds) // Filtramos por los IDs de productos visibles
-      .where('target', '==', target) // Filtramos por el target (Men, Women, Unisex)
-      .orderBy('name') // Si deseas ordenar por el nombre del producto
-      .offset(offset) // Paginación: saltamos los productos de las páginas anteriores
-      .limit(limitNum) // Limitamos la cantidad de productos por página
-      .get();
+    let query = productsRef
+      .where(admin.firestore.FieldPath.documentId(), 'in', productIds)
+      .where('category', '==', category);
 
-    const products = productsSnapshot.docs.map((doc) => {
-      const productData = doc.data(); // Los datos del producto
-      return {
-        id: doc.id,
-        ...productData,
-      };
-    });
-
-    if (products.length === 0) {
-      return res
-        .status(404)
-        .json({ message: 'No products found for the selected target.' });
+    // Aplicar filtro de target si no es 'All'
+    if (target !== 'All') {
+      query = query.where('target', '==', target);
     }
 
-    const totalVisibleProducts = visibleProductsSnapshot.size;
-    const totalPages = Math.ceil(totalVisibleProducts / limitNum);
+    query = query.orderBy('name').offset(offset).limit(limitNum);
+
+    const productsSnapshot = await query.get();
+
+    const products = productsSnapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    }));
+
+    const totalMatchingProducts = products.length;
+    const totalPages = Math.ceil(totalMatchingProducts / limitNum);
 
     return res.status(200).json({
       products,
       currentPage: pageNum,
-      totalPages: totalPages,
-      totalProducts: totalVisibleProducts,
+      totalPages,
+      totalProducts: totalMatchingProducts,
     });
   } catch (error) {
     console.error('Error fetching products:', error);
