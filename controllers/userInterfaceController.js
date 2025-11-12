@@ -1608,6 +1608,7 @@ const payPenalty = async (req, res) => {
         membershipId: membershipId, // Usar el membershipId obtenido del perfil
         gymId: gymId,
         paymentDate: new Date().toISOString().slice(0, 10),
+        timestamp: admin.firestore.Timestamp.now(),
         cardSerialNumber: profileData.cardSerialNumber,
         paymentType: 'Penalty',
         paymentAmount: paymentAmount, // Usar el monto de la penalización
@@ -1621,6 +1622,7 @@ const payPenalty = async (req, res) => {
         gymId: gymId,
         memberType: 'unknownMember',
         paymentDate: new Date().toISOString().slice(0, 10),
+        timestamp: admin.firestore.Timestamp.now(),
         paymentType: 'Penalty',
         cardSerialNumber: profileData.cardSerialNumber, // Suponiendo que este dato existe en profileData
         paymentPenaltyReason: paymentPenaltyReason,

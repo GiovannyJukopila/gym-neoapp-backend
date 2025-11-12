@@ -745,10 +745,31 @@ const generateExpirationReport = async (req, res) => {
   }
 };
 
+const getPaymentsWithOptionalSort = async (gymId, selectedDate) => {
+  try {
+    const collectionRef = admin.firestore().collection('paymentHistory');
+    let query = collectionRef
+      .where('gymId', '==', gymId)
+      .where('paymentDate', '==', selectedDate);
+
+    // Verificar si hay al menos un doc con 'timestamp'
+    const testSnap = await query.limit(1).get();
+    const hasTimestamp = testSnap.docs.some((doc) => !!doc.data().timestamp);
+
+    if (hasTimestamp) {
+      query = query.orderBy('timestamp', 'desc');
+    }
+
+    return await query.get();
+  } catch (error) {
+    console.error('Error getting payments with optional sort:', error);
+    return { docs: [] };
+  }
+};
+
 const generateDailyReport = async (req, res) => {
   try {
     const { gymId } = req.params;
-
     const { selectedDate } = req.body;
     const doc = new PDFDocument();
 
@@ -779,7 +800,6 @@ const generateDailyReport = async (req, res) => {
 
     const currentDate = new Date(localTimeInMilliseconds);
     currentDate.setUTCHours(0, 0, 0, 0);
-
     const dateString = currentDate.toISOString().split('T')[0];
 
     const tableData = [];
@@ -791,7 +811,6 @@ const generateDailyReport = async (req, res) => {
       .where('paymentType', '==', 'new')
       .where('paymentDate', '>=', selectedDate)
       .get();
-
     const totalNewMembers = newMembersQuery.size;
 
     const renewedMembersQuery = await admin
@@ -801,7 +820,6 @@ const generateDailyReport = async (req, res) => {
       .where('paymentType', '==', 'renew')
       .where('paymentDate', '>=', selectedDate)
       .get();
-
     const totalRenewedMembers = renewedMembersQuery.size;
 
     const startOfDay = new Date(`${selectedDate}T00:00:00`);
@@ -815,9 +833,7 @@ const generateDailyReport = async (req, res) => {
       .where('timestamp', '>=', startOfDay)
       .where('timestamp', '<=', endOfDay)
       .get();
-
     const totalCheckins = todayCheckinsQuery.size;
-    // Today's Revenue
 
     const todayCheckoutsQuery = await admin
       .firestore()
@@ -827,7 +843,6 @@ const generateDailyReport = async (req, res) => {
       .where('timestamp', '>=', startOfDay)
       .where('timestamp', '<=', endOfDay)
       .get();
-
     const totalCheckouts = todayCheckoutsQuery.size;
 
     const guestsQuery = await admin
@@ -836,7 +851,6 @@ const generateDailyReport = async (req, res) => {
       .where('gymId', '==', gymId)
       .where('currentDate', '==', selectedDate)
       .get();
-
     const totalGuests = guestsQuery.size;
 
     const frozenQuery = await admin
@@ -846,14 +860,7 @@ const generateDailyReport = async (req, res) => {
       .where('paymentType', '==', 'Freeze')
       .where('paymentDate', '==', selectedDate)
       .get();
-
-    let totalFrozen = 0; // Inicializa la variable para evitar errores
-
-    if (frozenQuery) {
-      totalFrozen = frozenQuery.size;
-    }
-
-    // Ahora puedes usar totalFrozen en tu lógica
+    let totalFrozen = frozenQuery ? frozenQuery.size : 0;
 
     const unFrozenQuery = await admin
       .firestore()
@@ -862,7 +869,6 @@ const generateDailyReport = async (req, res) => {
       .where('paymentType', '==', 'UnFreeze')
       .where('paymentDate', '==', selectedDate)
       .get();
-
     const totalUnfrozen = unFrozenQuery.size;
 
     const penaltyQuery = await admin
@@ -872,18 +878,15 @@ const generateDailyReport = async (req, res) => {
       .where('paymentType', '==', 'Penalty')
       .where('paymentDate', '==', selectedDate)
       .get();
-
     const totalPenalties = penaltyQuery.size;
 
-    const paymentsRef = admin
-      .firestore()
-      .collection('paymentHistory')
-      .where('gymId', '==', gymId)
-      .where('paymentDate', '==', selectedDate);
+    // ✅ Aquí reemplazamos el query normal por el seguro
+    const querySnapshot = await getPaymentsWithOptionalSort(
+      gymId,
+      selectedDate
+    );
 
     let totalReceive = 0;
-    const querySnapshot = await paymentsRef.get();
-
     const tablesByPaymentType = {
       Renew: [],
       New: [],
@@ -894,11 +897,8 @@ const generateDailyReport = async (req, res) => {
 
     for (const doc of querySnapshot.docs) {
       const paymentData = doc.data();
-      const paymentAmount = parseFloat(paymentData.paymentAmount); // Convertir a número
-
-      if (!isNaN(paymentAmount)) {
-        totalReceive += paymentAmount;
-      }
+      const paymentAmount = parseFloat(paymentData.paymentAmount);
+      if (!isNaN(paymentAmount)) totalReceive += paymentAmount;
 
       try {
         if (
@@ -911,77 +911,43 @@ const generateDailyReport = async (req, res) => {
             .collection('profiles')
             .doc(paymentData.profileId)
             .get();
-
           const membershipSnapshot = await admin
             .firestore()
             .collection('memberships')
             .doc(paymentData.membershipId)
             .get();
-
           const profileData = profileSnapshot.data();
           const membershipData = membershipSnapshot.data();
 
-          const signUpDate = paymentData.paymentDate; // Usar el dato que corresponda
+          const signUpDate = paymentData.paymentDate;
           const fullName = `${profileData.profileName} ${profileData.profileLastname}`;
           const cardNo = profileData.cardSerialNumber;
-          const membershipType = membershipData.planName
-            ? membershipData.planName
-            : '';
+          const membershipType = membershipData?.planName ?? '';
           const netRevenue = `€ ${paymentData.paymentAmount}`;
           const paymentType = paymentData.paymentType;
 
-          if (paymentType === 'renew') {
-            tablesByPaymentType.Renew.push([
-              signUpDate,
-              fullName,
-              cardNo,
-              membershipType,
-              netRevenue,
-              paymentType,
-            ]);
-          } else if (paymentType === 'new') {
-            tablesByPaymentType.New.push([
-              signUpDate,
-              fullName,
-              cardNo,
-              membershipType,
-              netRevenue,
-              paymentType,
-            ]);
-          } else if (paymentType === 'Freeze') {
-            tablesByPaymentType.Freeze.push([
-              signUpDate,
-              fullName,
-              cardNo,
-              membershipType,
-              netRevenue,
-              paymentType,
-            ]);
-          } else if (paymentType === 'UnFreeze') {
-            tablesByPaymentType.Unfreeze.push([
-              signUpDate,
-              fullName,
-              cardNo,
-              membershipType,
-              netRevenue,
-              paymentType,
-            ]);
-          } else if (paymentData.paymentType === 'Penalty') {
-            tablesByPaymentType.Penalty.push([
-              paymentData.paymentDate,
-              fullName,
-              cardNo,
-              membershipType,
-              netRevenue,
-              paymentData.paymentType,
-            ]);
-          }
+          const row = [
+            signUpDate,
+            fullName,
+            cardNo,
+            membershipType,
+            netRevenue,
+            paymentType,
+          ];
+
+          if (paymentType === 'renew') tablesByPaymentType.Renew.push(row);
+          else if (paymentType === 'new') tablesByPaymentType.New.push(row);
+          else if (paymentType === 'Freeze')
+            tablesByPaymentType.Freeze.push(row);
+          else if (paymentType === 'UnFreeze')
+            tablesByPaymentType.Unfreeze.push(row);
+          else if (paymentType === 'Penalty')
+            tablesByPaymentType.Penalty.push(row);
         }
       } catch (error) {
         console.error('Error fetching profiles/memberships:', error);
       }
     }
-
     // Resto del código después de que todas las promesas se resuelvan
 
     doc
@@ -1086,7 +1052,7 @@ const generateDailyReport = async (req, res) => {
       };
 
       // Generar la tabla en el documento PDF
-      doc.text(table.title, { align: 'center' }).moveDown(0.5);
+      // doc.text(table.title, { align: 'center' }).moveDown(0.5);
       doc.table(table, {
         prepareHeader: () => doc.font('Helvetica-Bold').fontSize(10),
         prepareRow: (row, indexColumn, indexRow, rectRow, rectCell) => {

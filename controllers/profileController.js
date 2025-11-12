@@ -119,7 +119,8 @@ const createProfile = async (req, res) => {
         paymentStartDate: req.body.profileStartDate,
         paymentEndDate: req.body.profileEndDate,
         paymentType: 'new',
-        paymentAmount: req.body.profileTotalReceive, // Establecer el paymentAmount obtenido del membership
+        paymentAmount: req.body.profileTotalReceive,
+        timestamp: admin.firestore.Timestamp.now(), // Establecer el paymentAmount obtenido del membership
         // ... (otros datos relacionados con el pago o historial)
       };
 
@@ -611,6 +612,7 @@ const freezeMembership = async (req, res) => {
       profileId: profileId,
       gymId: gymId,
       paymentDate: new Date().toISOString().slice(0, 10),
+      timestamp: admin.firestore.Timestamp.now(),
       paymentType: 'Freeze',
       paymentAmount: 0,
       membershipId: membershipId,
@@ -672,6 +674,7 @@ const unfreezeMembership = async (req, res) => {
       profileNewExpirationDate: profileUnfreezeExpirationDate,
       paymentStartDate: profileUnfreezeStartDate,
       paymentDate: new Date().toISOString().slice(0, 10),
+      timestamp: admin.firestore.Timestamp.now(),
       paymentType: 'UnFreeze',
       paymentUnFreezeDays: profileUnFreezeDays,
       paymentFrozenReason: profileFrozenReason,
@@ -841,6 +844,7 @@ const updateProfileEndDate = async (req, res) => {
       paymentEndDate: profilReneweData.profileRenewEndDate,
       paymentType: 'renew',
       paymentDate: new Date().toISOString().slice(0, 10),
+      timestamp: admin.firestore.Timestamp.now(),
       renewDate: new Date().toISOString().slice(0, 10),
       paymentAmount: profilReneweData.totalReceive, // Establecer el paymentAmount obtenido del membership
       // ... (otros datos relacionados con el pago o historial)
