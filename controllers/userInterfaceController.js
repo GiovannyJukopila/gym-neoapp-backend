@@ -530,8 +530,19 @@ const getmemberClassesByProfileId = async (req, res) => {
         .doc(classId)
         .collection('participants');
 
-      // Verificar si el profileId está en la subcolección
+      // Obtener la subcolección de waitingList
+      const waitingListCollectionRef = db
+        .collection('classes')
+        .doc(classId)
+        .collection('waitingList');
+
+      // Verificar si el profileId está en la subcolección de participantes
       const participantSnapshot = await participantsCollectionRef
+        .doc(profileId)
+        .get();
+
+      // Verificar si el profileId está en la subcolección de waitingList
+      const waitingListSnapshot = await waitingListCollectionRef
         .doc(profileId)
         .get();
 
@@ -540,10 +551,17 @@ const getmemberClassesByProfileId = async (req, res) => {
         const participantsSnapshot = await participantsCollectionRef.get();
         const participants = participantsSnapshot.docs.map((doc) => doc.data());
 
-        // Añadir los datos de la clase junto con los participantes
+        // Añadir los datos de la clase junto con los participantes y bookingStatus
         classes.push({
           ...classData,
           participants: participants,
+          bookingStatus: "confirmed"
+        });
+      } else if (waitingListSnapshot.exists) {
+        // Añadir los datos de la clase con bookingStatus en waitingList y sin participantes
+        classes.push({
+          ...classData,
+          bookingStatus: "waiting"
         });
       }
     }
@@ -674,16 +692,43 @@ const cancelMemberClass = async (req, res) => {
       return res.status(400).json({ error: 'Invalid role' });
     }
 
-    // Eliminar el participante actual
+    // Verificar si el profileId está en participants
     const participantQuery = await participantsCollectionRef
       .where('profileId', '==', profileId)
       .get();
 
-    if (participantQuery.empty) {
-      return res.status(404).json({ error: 'Member not found in class' });
+    // Verificar si el profileId está en waitingList
+    const waitingListQuery = await waitingListCollectionRef
+      .where('profileId', '==', profileId)
+      .get();
+
+    if (participantQuery.empty && waitingListQuery.empty) {
+      return res.status(404).json({ error: 'Member not found in class or waiting list' });
     }
 
-    // Eliminar al participante de la colección
+    // Si el miembro está en la waitingList, removerlo sin penalidad alguna
+    if (participantQuery.empty && !waitingListQuery.empty) {
+      const waitingBatch = db.batch();
+      waitingListQuery.forEach((doc) => {
+        waitingBatch.delete(doc.ref);
+      });
+      await waitingBatch.commit();
+
+      // Actualizar el contador de la lista de espera si aplica
+      if (waitingListCounterField) {
+        const updatedWaitingListSnapshot = await waitingListCollectionRef.get();
+        const currentWaitingListCount = updatedWaitingListSnapshot.size;
+        await classRef.update({
+          [waitingListCounterField]: currentWaitingListCount,
+        });
+      }
+
+      return res.status(200).json({
+        message: 'Member removed from waiting list successfully. No penalty applied.',
+      });
+    }
+
+    // El miembro está en participants, continuar con el flujo normal
     participantQuery.forEach((doc) => {
       batch.delete(doc.ref);
     });
