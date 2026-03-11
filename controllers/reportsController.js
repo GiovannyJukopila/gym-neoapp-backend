@@ -851,7 +851,10 @@ const generateDailyReport = async (req, res) => {
       .where('gymId', '==', gymId)
       .where('currentDate', '==', selectedDate)
       .get();
-    const totalGuests = guestsQuery.size;
+    const totalGuests = guestsQuery.docs.reduce(
+  (sum, doc) => sum + (doc.data().numberOfPeople || 0),
+  0
+);
 
     const frozenQuery = await admin
       .firestore()
