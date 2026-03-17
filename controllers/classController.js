@@ -328,6 +328,100 @@ const getAllClasses = async (req, res) => {
   }
 };
 
+const getClass = async (req, res) => {
+  try {
+    console.log("Entro bro")
+    const classId = req.params.classId || req.params.id;
+
+    const classRef = db.collection('classes').doc(classId);
+    const doc = await classRef.get();
+
+    if (!doc.exists) {
+      return res.status(404).json({ message: 'Class not found' });
+    }
+
+    const data = doc.data();
+
+    // Obtener los participantes regulares
+    const participantsSnapshot = await classRef
+      .collection('participants')
+      .select(
+        'profileId',
+        'profileName',
+        'profileLastname',
+        'attendance',
+        'profilePicture',
+        'profileEmail'
+      )
+      .get();
+    const participants = participantsSnapshot.docs.map((participantDoc) =>
+      participantDoc.data()
+    );
+
+    // Obtener los participantes desconocidos
+    const unknownParticipantsSnapshot = await classRef
+      .collection('unknownParticipants')
+      .get();
+    const unknownParticipants = unknownParticipantsSnapshot.docs.map(
+      (unknownParticipantDoc) => unknownParticipantDoc.data()
+    );
+
+    // Obtener la lista de espera de miembros conocidos
+    const waitingListSnapshot = await classRef
+      .collection('waitingList')
+      .orderBy('position') // Ordenar por posición
+      .get();
+    const waitingList = waitingListSnapshot.docs.map((waitingDoc) =>
+      waitingDoc.data()
+    );
+
+    // Obtener la lista de espera de miembros desconocidos
+    const unknownWaitingListSnapshot = await classRef
+      .collection('unknownWaitingList')
+      .orderBy('position') // Ordenar por posición
+      .get();
+    const unknownWaitingList = unknownWaitingListSnapshot.docs.map(
+      (unknownWaitingDoc) => unknownWaitingDoc.data()
+    );
+
+    const classDetails = {
+      id: classId,
+      classId: data.classId,
+      description: data.description || [],
+      gymId: data.gymId || '',
+      activityType: data.activityType,
+      classCapacity: data.classCapacity,
+      className: data.className,
+      selectedWeekDays: data.selectedWeekDays,
+      selectTrainer: data.selectTrainer || '',
+      startTime: data.startTime,
+      endTime: data.endTime,
+      eventDate: data.eventDate,
+      eventColor: data.eventColor,
+      limitCapacity: data.limitCapacity,
+      repeatDaily: data.repeatDaily,
+      weekDays: data.weekDays,
+      expirationDate: data.expirationDate,
+      participants: participants,
+      currentClassParticipants: data.currentClassParticipants,
+      unknownParticipants: unknownParticipants,
+      currentUnknownClassParticipants: data.currentUnknownClassParticipants,
+      waitingList: waitingList,
+      unknownWaitingList: unknownWaitingList,
+      attendance: data.attendance,
+      classesCancelled: data.classesCancelled,
+      personalClassId: data.personalClassId,
+      unknownClassCapacity: data.unknownClassCapacity,
+      primaryClassId: data?.primaryClassId,
+    };
+
+    res.status(200).json(classDetails);
+  } catch (error) {
+    console.error('Error en getClass:', error);
+    res.status(500).send(error);
+  }
+};
+
 const deleteAllClasses = async (req, res) => {
   try {
     const gymId = req.body.gymId; // Obtiene el gymId del cuerpo de la solicitud
@@ -2558,6 +2652,7 @@ module.exports = {
   createClass,
   createPrimaryClasses,
   getAllClasses,
+  getClass,
   getAllprimaryClasses,
   getWeekClasses,
   deleteClass,

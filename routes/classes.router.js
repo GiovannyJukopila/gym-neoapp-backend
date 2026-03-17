@@ -42,7 +42,7 @@ router.get('/todaysClasses/:gymId', verifyToken, getTodaysClasses);
 
 router.get('/getWeekClasses/:gymId', verifyToken, getWeekClasses);
 
-// router.get('/get/:id', getClass);
+router.get('/get/:classId', verifyToken, getClass);
 router.post(
   '/changeMemberAttendanceStatus',
   verifyToken,

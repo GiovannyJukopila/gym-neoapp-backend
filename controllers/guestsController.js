@@ -35,6 +35,8 @@ const createGuest = async (req, res) => {
       lastname: req.body.lastname,
       numberOfPeople: req.body.numberOfPeople,
       currentDate: dateString,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      dateTimestamp: currentDate,
     };
 
     // Crea el nuevo guest

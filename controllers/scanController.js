@@ -12,7 +12,9 @@ const scanMember = async (req, res) => {
     const querySnapshot = await query.get();
 
     if (querySnapshot.empty) {
-      res.status(404).send('This card has not been assigned');
+      res
+        .status(404)
+        .json({ message: 'This card has not been assigned', cardSerialNumber });
       return;
     }
 
@@ -33,20 +35,18 @@ const scanMember = async (req, res) => {
         profileData.profileStatus === 'payment-issue' ? true : false;
 
       if (isFrozen) {
-        res
-          .status(403)
-          .send(
-            `${profileData.profileName} ${profileData.profileLastname}'s  membership is currently frozen.`
-          );
+        res.status(403).json({
+          message: `${profileData.profileName} ${profileData.profileLastname}'s  membership is currently frozen.`,
+          cardSerialNumber,
+        });
         return;
       }
 
       if (profileInactiveOtherReason) {
-        res
-          .status(403)
-          .send(
-            `${profileData.profileName} ${profileData.profileLastname}'s  membership is Inactive for a payment Issue `
-          );
+        res.status(403).json({
+          message: `${profileData.profileName} ${profileData.profileLastname}'s  membership is Inactive for a payment Issue `,
+          cardSerialNumber,
+        });
         return;
       }
 
@@ -57,7 +57,9 @@ const scanMember = async (req, res) => {
       ]);
 
       if (!gymDoc.exists) {
-        res.status(404).send('Gym not in our DataBase');
+        res
+          .status(404)
+          .json({ message: 'Gym not in our DataBase', cardSerialNumber });
         return;
       }
       const formatCurrentDateTime = currentDateTime.toISOString().split('T')[0];
@@ -117,16 +119,18 @@ const scanMember = async (req, res) => {
           await profileDoc.ref.set(profileData, { merge: true });
         } else {
           // Membership has expired, and there is no renewal in queue
-          res
-            .status(403)
-            .send(
-              `${profileData.profileName} ${profileData.profileLastname}'s Membership has EXPIRED.`
-            );
+          res.status(403).json({
+            message: `${profileData.profileName} ${profileData.profileLastname}'s Membership has EXPIRED.`,
+            cardSerialNumber,
+          });
           return;
         }
       } else {
         if (membershipSnapshot.empty) {
-          res.status(403).send('No matching membership found for the user.');
+          res.status(403).json({
+            message: 'No matching membership found for the user.',
+            cardSerialNumber,
+          });
           return;
         }
 
@@ -138,9 +142,10 @@ const scanMember = async (req, res) => {
           .toUpperCase();
 
         if (!selectedWeekDays.includes(currentDay)) {
-          res
-            .status(403)
-            .send('Today is not allowed according to your membership.');
+          res.status(403).json({
+            message: 'Today is not allowed according to your membership.',
+            cardSerialNumber,
+          });
           return;
         }
 
@@ -156,9 +161,10 @@ const scanMember = async (req, res) => {
             formattedTime < startTimeOffPeak ||
             formattedTime > endTimeOffPeak
           ) {
-            res
-              .status(403)
-              .send('The current time is not within the Off-Peak range.');
+            res.status(403).json({
+              message: 'The current time is not within the Off-Peak range.',
+              cardSerialNumber,
+            });
             return;
           }
         }
