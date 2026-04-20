@@ -961,7 +961,7 @@ const generateDailyReport = async (req, res) => {
     //First table
 
     const summaryTableData = [
-      ["Today's revenue", `€ ${totalReceive}`],
+      ["Today's revenue", `€ ${totalReceive.toFixed(2)}`],
       ["Today's new memberships", totalNewMembers],
       ["Today's new renewal", totalRenewedMembers],
       ["Today's check-in", totalCheckins],
