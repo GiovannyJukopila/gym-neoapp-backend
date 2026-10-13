@@ -12,6 +12,11 @@ app.use(bodyParser.json());
 
 const jwt = require('jsonwebtoken');
 const secretKey = 'tu_secreto_secreto';
+const {
+  getGymToday,
+  shouldApplyRenewalNow,
+  buildProfileFromRenewal,
+} = require('../utils/membershipRenewal');
 
 const createProfile = async (req, res) => {
   try {
@@ -793,13 +798,15 @@ const updateProfileEndDate = async (req, res) => {
         .json({ error: 'There is already a plan renewal in queue' });
     }
 
+    const today = await getGymToday(gymId || profileData.gymId);
+
     // Create the 'renewMembershipInQueue' object
     const renewMembershipInQueue = {
       renewIsInQueue: true,
       membership: profilReneweData.currentSubscription,
       profileRenewStartDate: profilReneweData.profileRenewStartDate,
       profileRenewEndDate: profilReneweData.profileRenewEndDate,
-      renewDate: new Date().toISOString().slice(0, 10),
+      renewDate: today,
 
       profileRenewLastMembershipPrice:
         profilReneweData.currentSubscription.price,
@@ -815,21 +822,21 @@ const updateProfileEndDate = async (req, res) => {
       profileRenewIsCouple: profilReneweData.profileRenewIsCouple,
     };
 
-    // Store 'renewMembershipInQueue' in the user's profile
-    await profileRef.set({ renewMembershipInQueue }, { merge: true });
+    // Si el periodo actual ya termino y la fecha de inicio elegida ya llego, la
+    // renovación no tiene por qué esperar en la cola: se aplica de inmediato.
+    // Si el socio decidió empezar más adelante, queda en cola y su status sigue
+    // dependiendo del periodo actual (puede quedar inactivo hasta ese día).
+    const renewalApplied = shouldApplyRenewalNow(
+      { ...profileData, renewMembershipInQueue },
+      today
+    );
 
-    // const renewUpdatedInProfileCollection = {
-    //   profileLastMembershipPrice: profilReneweData.currentSubscription.price,
-    //   profileWasDiscount: profilReneweData.discountActivated,
-    //   profileWasComplementary: profilReneweData.complementaryActivated,
-    //   profileComplementaryReason: profilReneweData.complementaryReason,
-    //   profileDiscountType: profilReneweData.discountType,
-    //   profileDiscountPercentage: profilReneweData.discountPercentage,
-    //   profileDiscountValue: profilReneweData.discountValue,
-    //   profileTotalReceive: profilReneweData.totalReceive,
-    // };
-    // Verificar si se encontró el membership y obtener el precio
-    // await profileRef.update(renewUpdatedInProfileCollection);
+    const profileUpdate = renewalApplied
+      ? buildProfileFromRenewal(renewMembershipInQueue, today)
+      : { renewMembershipInQueue };
+
+    // Store the renewal in the user's profile (queued or already applied)
+    await profileRef.set(profileUpdate, { merge: true });
 
     const paymentHistoryRef = db.collection('paymentHistory');
     const newPaymentHistoryDoc = paymentHistoryRef.doc();
@@ -852,8 +859,15 @@ const updateProfileEndDate = async (req, res) => {
 
     await paymentHistoryRef.doc(paymentId).set(paymentHistoryData);
 
+    // Devolvemos el estado resultante para que el panel lo refleje al instante,
+    // sin necesidad de recargar la pagina.
     return res.status(200).json({
-      message: 'Profile updated, and object added to the queue successfully',
+      message: renewalApplied
+        ? 'Profile renewed and activated successfully'
+        : 'Profile updated, and object added to the queue successfully',
+      renewalApplied,
+      renewMembershipInQueue: profileUpdate.renewMembershipInQueue,
+      profile: profileUpdate,
     });
   } catch (error) {
     console.error('Error updating the profile:', error);

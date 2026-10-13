@@ -14,6 +14,12 @@ const {
   isWithinInterval,
 } = require('date-fns');
 const admin = require('firebase-admin');
+const {
+  normalizeDateString,
+  getGymToday,
+  shouldApplyRenewalNow,
+  buildProfileFromRenewal,
+} = require('../utils/membershipRenewal');
 
 const getTotalMembers = async (req, res) => {
   try {
@@ -215,35 +221,27 @@ const getCheckInReport = async (req, res) => {
     const startOfDay = new Date(`${dateString}T00:00:00`);
     const endOfDay = new Date(`${dateString}T23:59:59.999`);
 
-    const todayCheckinsQuery = await admin
-      .firestore()
-      .collection('accessHistory')
-      .where('gymId', '==', gymId)
-      .where('action', '==', 'check-in')
-      .where('timestamp', '>=', startOfDay)
-      .where('timestamp', '<=', endOfDay)
-      .get();
+    // Solo necesitamos el numero de accesos, no los documentos: count() se
+    // factura como una lectura por cada 1000 entradas de indice, mientras que
+    // traer los documentos cuesta una lectura por cada uno. Usa el mismo indice
+    // que la consulta anterior, asi que no hace falta crear ninguno.
+    const countAccessesToday = async (action) => {
+      const snapshot = await db
+        .collection('accessHistory')
+        .where('gymId', '==', gymId)
+        .where('action', '==', action)
+        .where('timestamp', '>=', startOfDay)
+        .where('timestamp', '<=', endOfDay)
+        .count()
+        .get();
 
-    let totalCheckInsToday = 0;
+      return snapshot.data().count || 0;
+    };
 
-    let totalCheckOutsToday = 0;
-
-    if (!todayCheckinsQuery.empty) {
-      totalCheckInsToday = todayCheckinsQuery.size;
-    }
-
-    const todayCheckOutsQuery = await admin
-      .firestore()
-      .collection('accessHistory')
-      .where('gymId', '==', gymId)
-      .where('action', '==', 'check-out')
-      .where('timestamp', '>=', startOfDay)
-      .where('timestamp', '<=', endOfDay)
-      .get();
-
-    if (!todayCheckOutsQuery.empty) {
-      totalCheckOutsToday = todayCheckOutsQuery.size;
-    }
+    const [totalCheckInsToday, totalCheckOutsToday] = await Promise.all([
+      countAccessesToday('check-in'),
+      countAccessesToday('check-out'),
+    ]);
 
     const responseData = {
       totalCheckOutsToday,
@@ -292,12 +290,44 @@ const getPaymentReport = async (req, res) => {
       now.getDate() + 1
     );
 
-    const snapshot = await paymentRef.where('gymId', '==', gymId).get();
+    // Antes se leia la coleccion paymentHistory COMPLETA del gimnasio en cada
+    // apertura del dashboard (miles de documentos) para acabar sumando solo los
+    // de los ultimos 7 dias. Ahora se acota la consulta a esa ventana.
+    //
+    // La consulta por paymentDate filtra por gymId porque ya existe el indice
+    // compuesto (gymId + paymentDate). La de renewDate no tiene indice
+    // compuesto, asi que usa el indice automatico de un solo campo y descarta
+    // los otros gimnasios en memoria: en una ventana de 7 dias son unas pocas
+    // decenas de documentos. Si llega a crecer, basta crear el indice
+    // (gymId + renewDate) y añadirle el .where('gymId', '==', gymId).
+    //
+    // Se piden 9 dias en lugar de 7 para no perder ningun documento por el
+    // desplazamiento de zona horaria; el filtro exacto sigue siendo el de abajo.
+    const windowStartDate = new Date(
+      localTimeInMilliseconds - 9 * 24 * 60 * 60 * 1000
+    )
+      .toISOString()
+      .slice(0, 10);
+
+    // Los pagos de tipo 'renew' se fechan por renewDate, el resto por
+    // paymentDate, asi que hacen falta las dos consultas
+    const [byPaymentDate, byRenewDate] = await Promise.all([
+      paymentRef
+        .where('gymId', '==', gymId)
+        .where('paymentDate', '>=', windowStartDate)
+        .get(),
+      paymentRef.where('renewDate', '>=', windowStartDate).get(),
+    ]);
+
+    const recentPayments = new Map();
+    [...byPaymentDate.docs, ...byRenewDate.docs].forEach((doc) => {
+      if (doc.data().gymId === gymId) recentPayments.set(doc.id, doc);
+    });
 
     let totalPaymentsLastSevenDays = 0;
     let totalPaymentsToday = 0;
 
-    snapshot.forEach((doc) => {
+    recentPayments.forEach((doc) => {
       const paymentType = doc.data().paymentType;
       let paymentDate;
 
@@ -317,18 +347,21 @@ const getPaymentReport = async (req, res) => {
       //   return;
       // }
 
+      // Un importe nulo o en texto convertia la suma entera en NaN
+      const amount = Number(doc.data().paymentAmount) || 0;
+
       if (
         paymentDate >= now.getTime() - 7 * 24 * 60 * 60 * 1000 &&
         paymentDate <= now.getTime()
       ) {
-        totalPaymentsLastSevenDays += parseFloat(doc.data().paymentAmount);
+        totalPaymentsLastSevenDays += amount;
       }
 
       if (
         paymentDate >= todayStart.getTime() &&
         paymentDate < todayEnd.getTime()
       ) {
-        totalPaymentsToday += parseFloat(doc.data().paymentAmount);
+        totalPaymentsToday += amount;
       }
     });
 
@@ -522,120 +555,107 @@ const getCurrentMembersByMemberships = async (gymId) => {
   }
 };
 
+// Firestore acepta 500 operaciones por lote; dejamos margen
+const PROFILE_BATCH_LIMIT = 450;
+
+const commitProfileWrites = async (writes) => {
+  for (let i = 0; i < writes.length; i += PROFILE_BATCH_LIMIT) {
+    const batch = db.batch();
+    writes.slice(i, i + PROFILE_BATCH_LIMIT).forEach(({ ref, data }) => {
+      batch.update(ref, data);
+    });
+    await batch.commit();
+  }
+};
+
+/**
+ * Tarea diaria de membresias. Para cada socio del gimnasio:
+ *
+ *  1. Si tiene una renovacion en cola cuyo periodo ya rige (el plan anterior
+ *     termino y la fecha de inicio elegida llego), la aplica: cambia el plan,
+ *     las fechas, el precio y deja el status activo.
+ *  2. Si no, recalcula el status contra su fecha de expiracion actual. Una
+ *     renovacion que todavia no empieza NO lo activa: si su plan vencio,
+ *     queda inactivo hasta el dia que eligio para empezar.
+ *
+ * Los perfiles congelados y los marcados manualmente como 'payment-issue' se
+ * dejan intactos, y solo se escribe lo que realmente cambia.
+ */
 const setInactiveMembers = async (gymId) => {
+  if (!gymId || typeof gymId !== 'string') {
+    throw new Error('A valid gymId is required to update memberships');
+  }
+
   try {
-    const gymSnapshot = await admin
-      .firestore()
-      .collection('gyms')
-      .doc(gymId)
-      .get();
-    const gymData = gymSnapshot.data();
-    const gymTimeZone = gymData.gymTimeZone;
-    const utcOffset = getUtcOffset(gymTimeZone);
+    const today = await getGymToday(gymId);
 
-    const utcDate = new Date();
-    const localTimeInMilliseconds = utcDate.getTime() - utcOffset * 60 * 1000;
-
-    const currentDate = new Date(localTimeInMilliseconds);
-    currentDate.setUTCHours(0, 0, 0, 0);
-
-    const dateString = currentDate.toISOString().split('T')[0];
-
-    // Obtener los perfiles en la colección de perfiles para el gimnasio específico
-    const profilesSnapshot = await admin
-      .firestore()
+    const profilesSnapshot = await db
       .collection('profiles')
       .where('gymId', '==', gymId)
       .where('role', 'array-contains', 'member')
       .get();
 
-    const batch = admin.firestore().batch();
-    profilesSnapshot.forEach(async (doc) => {
-      const profileData = doc.data();
-      const profileFrozen = profileData.profileFrozen || false;
-      const profileEndDate = profileData.profileEndDate; // asumiendo que profileEndDate es una cadena
-      const renewEndDate =
-        profileData.renewMembershipInQueue?.profileRenewEndDate; // asumiendo que renewMembershipInQueue es un objeto opcional
-      const profileRef = admin.firestore().collection('profiles').doc(doc.id);
+    const writes = [];
+    let renewalsApplied = 0;
+    let statusesUpdated = 0;
 
-      if (profileFrozen) {
-        // No actualizar perfiles congelados
+    profilesSnapshot.forEach((doc) => {
+      const profileData = doc.data();
+
+      // No se tocan los perfiles congelados
+      if (profileData.profileFrozen) return;
+
+      // 1. La renovacion en cola ya rige: se cambia el plan y queda activo
+      if (shouldApplyRenewalNow(profileData, today)) {
+        writes.push({
+          ref: doc.ref,
+          data: buildProfileFromRenewal(
+            profileData.renewMembershipInQueue,
+            today
+          ),
+        });
+        renewalsApplied += 1;
         return;
       }
-      // Verificar si renewMembershipInQueue existe y renewIsInQueue es falso
-      let profileStatus = 'false';
 
-      if (
-        profileData.renewMembershipInQueue &&
-        profileData.renewMembershipInQueue.renewIsInQueue
-      ) {
-        profileStatus =
-          profileData.renewMembershipInQueue.profileRenewEndDate > dateString
-            ? 'true'
-            : 'false';
+      // 'payment-issue' es una marca manual del administrador, no se pisa
+      if (profileData.profileStatus === 'payment-issue') return;
 
-        const renewMembershipInQueue = profileData.renewMembershipInQueue;
+      // 2. El status depende solo del periodo actual del socio
+      const currentEndDate = normalizeDateString(profileData.profileEndDate);
+      const profileStatus =
+        currentEndDate && currentEndDate >= today ? 'true' : 'false';
 
-        // Realiza los cambios en profileData utilizando los valores de renewMembershipInQueue
-        profileData.profileEndDate = renewMembershipInQueue.profileRenewEndDate;
-        profileData.membershipId = renewMembershipInQueue.membership.value;
-        profileData.profileLastMembershipPrice =
-          renewMembershipInQueue.profileRenewLastMembershipPrice;
-        profileData.profileWasDiscount =
-          renewMembershipInQueue.profileRenewWasDiscount;
-        profileData.profileWasComplementary =
-          renewMembershipInQueue.profileRenewWasComplementary;
-        profileData.profileComplementaryReason =
-          renewMembershipInQueue.profileRenewComplementaryReason;
-        profileData.profileDiscountType =
-          renewMembershipInQueue.profileRenewDiscountType;
-        profileData.profileDiscountPercentage =
-          renewMembershipInQueue.profileRenewDiscountPercentage;
-        profileData.profileDiscountValue =
-          renewMembershipInQueue.profileRenewDiscountValue;
-        profileData.profileTotalReceive =
-          renewMembershipInQueue.profileRenewTotalReceive;
-        profileData.renewMembershipInQueue.renewIsInQueue = false;
-        profileData.profileStartDate =
-          renewMembershipInQueue.profileRenewStartDate;
-        if (renewMembershipInQueue.profileRenewIsCouple !== undefined) {
-          profileData.profileIsACouple =
-            renewMembershipInQueue.profileRenewIsCouple;
-        }
+      if (profileData.profileStatus === profileStatus) return;
 
-        // Verifica si el campo existe antes de intentar establecerlo
-        if (renewMembershipInQueue.profileRenewCoupleName !== undefined) {
-          profileData.profileCoupleName =
-            renewMembershipInQueue.profileRenewCoupleName;
-        }
-
-        // Verifica si el campo existe antes de intentar establecerlo
-        if (renewMembershipInQueue.profileRenewCoupleEmail !== undefined) {
-          profileData.profileRenewCoupleEmail =
-            renewMembershipInQueue.profileRenewCoupleEmail;
-        }
-        batch.update(doc.ref, profileData);
-        // Elimina la propiedad renewMembershipInQueue
-        //delete profileData.renewMembershipInQueue;
-
-        // Guarda los cambios en la base de datos (suponiendo que profilesRef es tu referencia a la base de datos)
-        await doc.ref.set(profileData, { merge: true });
-      } else {
-        profileStatus = profileEndDate >= dateString ? 'true' : 'false';
-        batch.update(profileRef, { profileStatus });
-      }
-
-      // Actualizar el estado del perfil en el lote
+      writes.push({ ref: doc.ref, data: { profileStatus } });
+      statusesUpdated += 1;
     });
 
-    // Ejecutar la actualización en lote
-    await batch.commit();
+    await commitProfileWrites(writes);
+
+    return {
+      gymId,
+      date: today,
+      profilesReviewed: profilesSnapshot.size,
+      renewalsApplied,
+      statusesUpdated,
+    };
   } catch (error) {
     console.error('Error al actualizar perfiles:', error);
     throw new Error('Error interno del servidor');
   }
 };
 
+// Version expuesta por HTTP (boton "update member status" del panel)
+const setInactiveMembersHandler = async (req, res) => {
+  try {
+    const summary = await setInactiveMembers(req.params.gymId);
+    return res.status(200).json(summary);
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+};
 const updateTotalAmountByMonth = async (gymId) => {
   try {
     const paymentHistoryRef = db.collection('paymentHistory');
@@ -647,7 +667,9 @@ const updateTotalAmountByMonth = async (gymId) => {
     snapshot.forEach((doc) => {
       const paymentData = doc.data();
       const paymentDate = paymentData.paymentDate;
-      const amount = paymentData.paymentAmount;
+      // Algunos paymentAmount llegan como texto o null: sin convertir a numero,
+      // el += concatena strings y corrompe el total del mes entero
+      const amount = Number(paymentData.paymentAmount) || 0;
 
       // Intentar crear un objeto Date
       const dateObject = new Date(paymentDate);
@@ -677,12 +699,48 @@ const updateTotalAmountByMonth = async (gymId) => {
   }
 };
 
+// Version expuesta por HTTP de getCurrentMembersByMemberships
+// (carga del dashboard y boton "Cake Graphic" de master-admin)
+const getCurrentMembersByMembershipsHandler = async (req, res) => {
+  const { gymId } = req.params;
+
+  if (!gymId || typeof gymId !== 'string') {
+    return res.status(400).json({ error: 'A valid gymId is required' });
+  }
+
+  try {
+    const membershipTotals = await getCurrentMembersByMemberships(gymId);
+    return res.status(200).json(membershipTotals);
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+// Version expuesta por HTTP de updateTotalAmountByMonth
+const updateTotalAmountByMonthHandler = async (req, res) => {
+  const { gymId } = req.params;
+
+  if (!gymId || typeof gymId !== 'string') {
+    return res.status(400).json({ error: 'A valid gymId is required' });
+  }
+
+  try {
+    const totalAmountByMonth = await updateTotalAmountByMonth(gymId);
+    return res.status(200).json(totalAmountByMonth);
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+};
+
 module.exports = {
   getTotalMembers,
   getCurrentMembersByMemberships,
+  getCurrentMembersByMembershipsHandler,
+  updateTotalAmountByMonthHandler,
   getCheckInReport,
   getPaymentReport,
   getGuestReport,
   setInactiveMembers,
+  setInactiveMembersHandler,
   updateTotalAmountByMonth,
 };
