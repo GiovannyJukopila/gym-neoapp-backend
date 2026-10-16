@@ -1,6 +1,10 @@
 const express = require('express');
 const app = express();
 const { db } = require('../firebase');
+const {
+  registerCreditUsage,
+  applyCreditPenalty,
+} = require('../utils/credits');
 const bodyParser = require('body-parser');
 const admin = require('firebase-admin');
 const QRCode = require('qrcode');
@@ -103,17 +107,25 @@ const addClassUnknownParticipants = async (req, res) => {
       selectedPackage: { deductedAtBooking },
     } = profileDoc;
 
-    if (currentCredit === 0) {
+    // Tope en <= 0, no en === 0: un saldo ya negativo tampoco puede consumir
+    if (currentCredit <= 0) {
       return res.status(400).json({
         message: 'You do not have available credit',
       });
     }
 
-    if (deductedAtBooking) {
-      // Actualizar el currentCredit en el perfil de la persona
-      const profileRef = db.collection('profiles').doc(profileId);
-      await profileRef.update({
-        currentCredit: admin.firestore.FieldValue.increment(-1),
+    // Comprobacion y descuento en una transaccion, idempotente por clase
+    const bookingUsage = await registerCreditUsage({
+      profileId,
+      activityId: classId,
+      reason: 'booking',
+      gymId: profileDoc.gymId,
+      shouldDebit: deductedAtBooking === true,
+    });
+
+    if (bookingUsage.status === 'no-credit') {
+      return res.status(400).json({
+        message: 'You do not have available credit',
       });
     }
 
@@ -995,18 +1007,21 @@ const cancelMemberClass = async (req, res) => {
               reason = `Cancellation occurred less than ${penaltyWaiveValue} ${penaltyUnit} before the class started.`;
             }
 
-            // Permitir que el saldo de créditos sea negativo
-            const updatedCredits = profileData.currentCredit - penaltyAmount;
-            await profileRef.update({
-              currentCredit: updatedCredits,
-              penaltyActive: true,
+            // Se cobra hasta donde alcanza el saldo y el resto queda como
+            // deuda en creditDebt. El saldo nunca baja de 0, asi que un
+            // negativo en la base de datos ya solo puede ser un fallo.
+            const penaltyResult = await applyCreditPenalty({
+              profileId,
+              penaltyAmount,
             });
+            await profileRef.update({ penaltyActive: true });
             const penaltyDetails = {
               type: 'creditsPenalty',
               amount: penaltyAmount,
               reason,
             };
-            const penaltyStatus = updatedCredits < 0; // true si negativo, false si 0 o positivo
+            // Queda pendiente de cobro: antes se deducia de un saldo negativo
+            const penaltyStatus = penaltyResult.creditDebt > 0;
 
             await logUserPenalty(
               profileId,
@@ -1143,12 +1158,13 @@ const cancelMemberClass = async (req, res) => {
 
             // Verificar si se debe descontar el crédito
             if (deductedAtBooking) {
-              await db
-                .collection('profiles')
-                .doc(nextProfileId)
-                .update({
-                  currentCredit: admin.firestore.FieldValue.increment(-1),
-                });
+              await registerCreditUsage({
+                profileId: nextProfileId,
+                activityId: classId,
+                reason: 'booking',
+                gymId: gymId,
+                shouldDebit: true,
+              });
             }
 
             // Enviar notificación por correo electrónico
@@ -1362,7 +1378,8 @@ const addToUnknownMemberWaitingList = async (req, res) => {
       selectedPackage: { deductedAtBooking },
     } = profileDoc;
 
-    if (currentCredit === 0) {
+    // Tope en <= 0, no en === 0
+    if (currentCredit <= 0) {
       return res.status(400).json({
         message: 'You do not have available credit',
       });
@@ -1954,12 +1971,15 @@ const applyNonMemberPenalty = async (participantId, primaryClass) => {
 
     if (updatedNoShowCount > maxNonMembersNoShows) {
       const penaltyAmount = nonMemberCreditsPenalty;
-      const updatedCredits = currentCredit - penaltyAmount;
 
-      await profileRef.update({
-        currentCredit: updatedCredits,
-        penaltyActive: true,
+      // Igual que en la cancelacion tardia: lo que no se puede cobrar del
+      // saldo queda como deuda, nunca como saldo negativo
+      const penaltyResult = await applyCreditPenalty({
+        profileId: participantId,
+        penaltyAmount,
       });
+
+      await profileRef.update({ penaltyActive: true });
 
       const penaltyDetails = {
         type: 'creditsPenalty',
@@ -1967,7 +1987,7 @@ const applyNonMemberPenalty = async (participantId, primaryClass) => {
         reason: `Exceeded the maximum allowed no shows of ${maxNonMembersNoShows} within 30 days.`,
       };
 
-      const penaltyStatus = updatedCredits < 0;
+      const penaltyStatus = penaltyResult.creditDebt > 0;
 
       await logUserPenalty(
         participantId,

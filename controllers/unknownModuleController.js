@@ -1,6 +1,10 @@
 const express = require('express');
 const app = express();
 const { db } = require('../firebase');
+const {
+  registerCreditUsage,
+  settleCreditDebt,
+} = require('../utils/credits');
 const bodyParser = require('body-parser');
 const admin = require('firebase-admin');
 const moment = require('moment');
@@ -342,6 +346,9 @@ const createUnknownMember = async (req, res) => {
         unknownMemberPhoneNumber: req.body.phoneNumber,
         selectedPackage: req.body.selectedPackage,
         currentCredit: req.body.selectedPackage.creditNumber,
+        // Deuda por penalizaciones, siempre positiva. El saldo (currentCredit)
+        // nunca baja de 0.
+        creditDebt: 0,
         totalReceive: req.body.fee,
         unknownMemberNotes: req.body.notes,
         unknownMemberStatus: 'active',
@@ -437,8 +444,16 @@ const updateUnknownMember = async (req, res) => {
       totalReceive,
       unknownMemberNotes,
       profilePicture,
-      currentCredit,
     };
+
+    // El saldo es editable a mano desde el panel, asi que esta es la ultima via
+    // por la que podria volver a quedar en negativo: se normaliza a un entero
+    // nunca menor que 0. Una deuda no se representa aqui, va en creditDebt.
+    // Si no llega un numero valido no se toca el saldo existente.
+    const parsedCredit = Number(currentCredit);
+    if (Number.isFinite(parsedCredit)) {
+      formData.currentCredit = Math.max(0, Math.trunc(parsedCredit));
+    }
 
     const profileRef = db
       .collection('profiles')
@@ -525,13 +540,29 @@ const refundUnknownMemberCard = async (req, res) => {
 const sendUnknownMemberAttendance = async (req, res) => {
   try {
     const { selectedOption, selectedValue, profileDetails } = req.body;
-    const currentCredit = profileDetails.currentCredit;
-    const deductedAtBooking = profileDetails.deductedAtBooking;
     const profileId = profileDetails.profileId;
     const cardSerialNumber = profileDetails.cardSerialNumber;
     let activityId;
 
-    if (currentCredit === 0) {
+    // El saldo y la configuracion del paquete se leen de la base de datos, no
+    // del request: el navegador puede traer un valor obsoleto y esa era una de
+    // las causas de los saldos negativos.
+    const storedProfileDoc = await db.collection('profiles').doc(profileId).get();
+
+    if (!storedProfileDoc.exists) {
+      return res.status(404).json({ message: 'Profile not found' });
+    }
+
+    const storedProfile = storedProfileDoc.data();
+    const currentCredit = Number(storedProfile.currentCredit) || 0;
+    // deductedAtBooking vive dentro de selectedPackage; antes se leia de la
+    // raiz del objeto del request, donde siempre era undefined, y por eso esta
+    // ruta descontaba siempre (cobrando dos veces a los paquetes que ya
+    // descuentan al reservar)
+    const deductedAtBooking =
+      storedProfile.selectedPackage?.deductedAtBooking === true;
+
+    if (currentCredit <= 0) {
       return res.status(400).json({
         message: 'This member does not have available credit',
       });
@@ -601,16 +632,30 @@ const sendUnknownMemberAttendance = async (req, res) => {
       activityId = selectedValue.sessionId;
     }
 
-    if (!deductedAtBooking) {
-      // Restar 1 crédito del currentCredit del profileDetails
-      profileDetails.currentCredit--;
+    // Comprobacion y descuento en una sola transaccion, e idempotente por
+    // (perfil, asistencia, actividad): si la misma asistencia se envia dos
+    // veces, la segunda no vuelve a cobrar
+    const usage = await registerCreditUsage({
+      profileId,
+      activityId,
+      reason: 'attendance',
+      gymId: storedProfile.gymId,
+      shouldDebit: !deductedAtBooking,
+    });
 
-      // Actualizar el currentCredit en el perfil de la persona
-      const profileRef = db.collection('profiles').doc(profileId);
-      await profileRef.update({
-        currentCredit: admin.firestore.FieldValue.increment(-1),
+    if (usage.status === 'no-credit') {
+      return res.status(400).json({
+        message: 'This member does not have available credit',
       });
     }
+
+    // Reenvio de una asistencia ya registrada: no se cobra ni se duplica el
+    // historial, pero se responde con exito porque el estado final es correcto
+    if (usage.status === 'duplicate') {
+      return res.status(200).json({ message: 'Received data successfully.' });
+    }
+
+    profileDetails.currentCredit = usage.currentCredit;
 
     // Agregar entrada en el historial de asistencia
     const attendanceHistoryRef = db.collection('attendanceHistory');
@@ -621,7 +666,10 @@ const sendUnknownMemberAttendance = async (req, res) => {
       cardSerialNumber: cardSerialNumber,
       attendanceDate: new Date(),
       role: 'non-member',
-      currentCredit: currentCredit - 1,
+      // El saldo resultante real. Antes se guardaba el valor del request menos
+      // uno, que en el incidente de octubre registro "0" dos veces y oculto
+      // que el saldo habia quedado en -1
+      currentCredit: usage.currentCredit,
     });
 
     res.status(200).json({ message: 'Received data successfully.' });
@@ -655,16 +703,19 @@ const renewprepaidpackage = async (req, res) => {
 
     // Si el perfil tiene penaltyActive en true
     if (currentProfileDoc && currentProfileDoc.data().penaltyActive === true) {
-      // Obtener el crédito actual y el que debe
-      const currentCredit = currentProfileDoc.data().currentCredit || 0;
-      const debtCredit = body.currentCredit || 0; // Créditos que debe según el body
+      // La deuda por penalizaciones vive en creditDebt (siempre positiva), no
+      // en un saldo negativo. Los creditos del paquete nuevo la liquidan antes
+      // de quedar disponibles.
+      const settlement = settleCreditDebt({
+        purchasedCredits: body.currentCredit,
+        leftoverCredit: currentProfileDoc.data().currentCredit,
+        pendingDebt: currentProfileDoc.data().creditDebt,
+      });
 
-      // Calcular el nuevo crédito después de descontar el crédito de la deuda
-      const updatedCredit = debtCredit + currentCredit;
-
-      // Actualizar el perfil: descontar crédito y desactivar penalización
+      // Actualizar el perfil: liquidar la deuda y desactivar penalización
       batch.update(currentProfileDoc.ref, {
-        currentCredit: updatedCredit,
+        currentCredit: settlement.currentCredit,
+        creditDebt: settlement.creditDebt,
         penaltyActive: false,
       });
 

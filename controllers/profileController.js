@@ -17,6 +17,12 @@ const {
   shouldApplyRenewalNow,
   buildProfileFromRenewal,
 } = require('../utils/membershipRenewal');
+const {
+  PREFIX_CEILING,
+  tokenize,
+  prefixVariants,
+  rankProfiles,
+} = require('../utils/nameSearch');
 
 const createProfile = async (req, res) => {
   try {
@@ -1127,56 +1133,79 @@ const searchKnownMemberByCardNumber = async (req, res) => {
 
 const searchProfile = async (req, res) => {
   try {
-    let searchTerm = req.query.term; // Obtén el término de búsqueda y elimina espacios adicionales
-    searchTerm = searchTerm.charAt(0).toUpperCase() + searchTerm.slice(1);
-
     const gymId = req.query.gymId;
+    const tokens = tokenize(req.query.term);
 
-    let profiles = [];
+    if (!gymId || tokens.length === 0) {
+      return res.json([]);
+    }
 
     const profilesRef = db.collection('profiles');
 
-    if (searchTerm.includes(' ')) {
-      const [firstName, ...lastNameArr] = searchTerm.split(' ');
-      const lastName = lastNameArr.join(' ');
+    // Se ancla la consulta en la primera palabra escrita y el resto se filtra
+    // en memoria. Asi el numero de consultas no crece con lo que se teclea, y
+    // el orden de las palabras deja de importar.
+    const anchor = tokens[0];
+    const variants = prefixVariants(anchor);
 
-      const nameSnapshot = await profilesRef
+    const runPrefixQuery = (field, value) =>
+      profilesRef
         .where('gymId', '==', gymId)
         .where('role', 'array-contains', 'member')
-        .where('profileName', '==', `${firstName} ${lastName}`)
+        .where(field, '>=', value)
+        // PREFIX_CEILING es el caracter Unicode alto de verdad. Antes aqui
+        // habia un '\\uf8ff' con la barra escapada, y por eso buscar "Gio" no
+        // encontraba "Giovanny": solo entraba la coincidencia exacta.
+        .where(field, '<=', value + PREFIX_CEILING)
+        .limit(200)
         .get();
 
-      nameSnapshot.forEach((doc) => {
-        profiles.push(doc.data());
-      });
+    const candidates = [];
 
-      const lastNameSnapshot = await profilesRef
-        .where('gymId', '==', gymId)
-        .where('role', 'array-contains', 'member')
-        .where('profileLastname', '==', lastName)
-        .get();
+    // Por nombre: funciona con el indice que ya existe
+    const byName = await Promise.all(
+      variants.map((value) => runPrefixQuery('profileName', value))
+    );
+    byName.forEach((snapshot) =>
+      snapshot.forEach((doc) => candidates.push(doc.data()))
+    );
 
-      lastNameSnapshot.forEach((doc) => {
-        profiles.push(doc.data());
-      });
-    } else {
-      const snapshot = await profilesRef
-        .where('gymId', '==', gymId)
-        .where('role', 'array-contains', 'member')
-        .where('profileName', '>=', searchTerm)
-        .where('profileName', '<=', searchTerm + '\\uf8ff')
-        .get();
+    // Por apellido. La version con gymId y role dentro de la consulta necesita
+    // un indice compuesto; si no existe, se usa el indice automatico de un solo
+    // campo y se descartan los otros gimnasios en memoria. Los apellidos que
+    // comparten prefijo son unas pocas decenas, asi que sale practicamente
+    // igual de barato y no hay que esperar a desplegar nada.
+    const lastnameSnapshots = await Promise.all(
+      variants.map(async (value) => {
+        try {
+          return await runPrefixQuery('profileLastname', value);
+        } catch (error) {
+          if (error.code !== 9) throw error;
 
+          return profilesRef
+            .where('profileLastname', '>=', value)
+            .where('profileLastname', '<=', value + PREFIX_CEILING)
+            .limit(300)
+            .get();
+        }
+      })
+    );
+
+    lastnameSnapshots.forEach((snapshot) =>
       snapshot.forEach((doc) => {
-        profiles.push(doc.data());
-      });
-    }
+        const data = doc.data();
+        // El filtro de gimnasio y de rol se aplica aqui porque la consulta de
+        // reserva no los lleva dentro
+        if (data.gymId !== gymId) return;
+        if (!Array.isArray(data.role) || !data.role.includes('member')) return;
+        candidates.push(data);
+      })
+    );
 
-    if (profiles.length === 0) {
-      res.status(404).json({ message: 'Perfiles no encontrados' });
-    } else {
-      res.json(profiles);
-    }
+    // Devuelve 200 con una lista vacia cuando no hay nada. Antes respondia 404
+    // y el panel interpretaba el error volviendo a mostrar la lista completa,
+    // asi que escribir un nombre inexistente mostraba a todo el mundo.
+    return res.json(rankProfiles(candidates, tokens));
   } catch (error) {
     console.error('Error al buscar perfiles por término de búsqueda:', error);
     res.status(500).json({

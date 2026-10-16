@@ -1,6 +1,10 @@
 const express = require('express');
 const app = express();
 const { db } = require('../firebase');
+const {
+  classifyPaymentScope,
+  buildMembershipUpdate,
+} = require('../utils/paymentAdjustment');
 const bodyParser = require('body-parser');
 const jwt = require('jsonwebtoken');
 const admin = require('firebase-admin');
@@ -139,16 +143,58 @@ app.use(bodyParser.json());
 
 const getAllFinancial = async (req, res) => {
   try {
-    const { gymId, filterOption, offset, itemsPerPage } = req.query;
+    const { gymId, filterOption, offset, itemsPerPage, startDate, endDate } =
+      req.query;
 
-    const filterDate = await calculateDate(filterOption, gymId);
-    const paymentHistorySnapshot = await db
-      .collection('paymentHistory')
-      .where('paymentDate', '==', filterDate)
-      .where('gymId', '==', gymId)
-      .limit(parseInt(itemsPerPage))
-      .offset(parseInt(offset))
-      .get();
+    const limitValue = parseInt(itemsPerPage) || 50;
+    const offsetValue = parseInt(offset) || 0;
+
+    let paymentHistorySnapshot;
+
+    if (startDate && endDate) {
+      // Filtro por rango de fechas. El indice compuesto (gymId + paymentDate)
+      // que ya existe soporta la igualdad de gymId mas el rango.
+      const rangeQuery = db
+        .collection('paymentHistory')
+        .where('gymId', '==', gymId)
+        .where('paymentDate', '>=', startDate)
+        .where('paymentDate', '<=', endDate);
+
+      try {
+        // Lo natural es ver primero los pagos mas recientes, pero ese orden
+        // necesita el indice (gymId + paymentDate DESC)
+        paymentHistorySnapshot = await rangeQuery
+          .orderBy('paymentDate', 'desc')
+          .limit(limitValue)
+          .offset(offsetValue)
+          .get();
+      } catch (error) {
+        // Mientras ese indice no exista, se usa el orden ascendente, que si
+        // funciona con el indice actual, en lugar de dejar la pantalla vacia
+        if (error.code === 9) {
+          console.warn(
+            '[financial] Falta el indice (gymId + paymentDate DESC); se usa orden ascendente. Crealo desplegando firestore.indexes.json'
+          );
+          paymentHistorySnapshot = await rangeQuery
+            .orderBy('paymentDate', 'asc')
+            .limit(limitValue)
+            .offset(offsetValue)
+            .get();
+        } else {
+          throw error;
+        }
+      }
+    } else {
+      // Compatibilidad con el filtro anterior (hoy / ayer)
+      const filterDate = await calculateDate(filterOption, gymId);
+      paymentHistorySnapshot = await db
+        .collection('paymentHistory')
+        .where('paymentDate', '==', filterDate)
+        .where('gymId', '==', gymId)
+        .limit(limitValue)
+        .offset(offsetValue)
+        .get();
+    }
 
     const payments = [];
     paymentHistorySnapshot.forEach((doc) => {
@@ -164,6 +210,11 @@ const getAllFinancial = async (req, res) => {
         memberType: paymentData.memberType,
         profileId: paymentData.profileId || null,
         membershipId: paymentData.membershipId || null,
+        // Periodo que cubre el pago: lo necesita el editor para saber si el
+        // pago rige la membresia vigente
+        paymentStartDate: paymentData.paymentStartDate || null,
+        paymentEndDate: paymentData.paymentEndDate || null,
+        lastAdjustedBy: paymentData.lastAdjustedBy || null,
       });
     });
 
@@ -283,8 +334,14 @@ function formatDate(date) {
 const updateFinancial = async (req, res) => {
   try {
     const { fullName, gymId, paymentData: innerPaymentData } = req.body;
-    const { membership, paymentType, paymentReceived, paymentDate } =
-      innerPaymentData;
+    const {
+      membership,
+      paymentType,
+      paymentReceived,
+      paymentDate,
+      periodStartDate,
+      periodEndDate,
+    } = innerPaymentData;
     const paymentId = req.params.paymentId;
 
     const paymentRef = db.collection('paymentHistory').doc(paymentId);
@@ -296,59 +353,114 @@ const updateFinancial = async (req, res) => {
 
     const paymentInfo = paymentSnapshot.data();
 
-    const paymentUpdateData = {
-      membershipId: membership,
-      paymentType: paymentType,
-      paymentAmount: paymentReceived,
-      paymentDate: paymentDate,
-    };
-
-    // Si el paymentType es 'session', solo actualizar el pago y terminar
-    if (paymentType === 'Court') {
-      await paymentRef.update(paymentUpdateData);
-      return res
-        .status(200)
-        .json({ message: 'Payment data updated successfully' });
+    // Un importe en texto o vacio corrompia las sumas de los informes
+    const amount = Number(paymentReceived);
+    if (!Number.isFinite(amount)) {
+      return res.status(400).json({ message: 'Invalid payment amount' });
     }
 
-    // Si el paymentType no es 'session', continuar con la actualización del perfil
-    const { profileId } = paymentInfo;
+    // El perfil solo se lee si el pago tiene uno. Las pistas y las sesiones no
+    // lo tienen, y antes esto reventaba con un 500 al llamar a doc(undefined).
+    let profileRef = null;
+    let profileData = null;
 
-    const profileRef = db.collection('profiles').doc(profileId);
-    const profileSnapshot = await profileRef.get();
-
-    if (!profileSnapshot.exists) {
-      return res.status(404).send('Profile not found');
-    }
-
-    const profileData = profileSnapshot.data();
-    const { renewMembershipInQueue } = profileData;
-
-    const profileUpdateData = {
-      profileTotalReceive: paymentReceived,
-      membershipId: membership,
-    };
-
-    await paymentRef.update(paymentUpdateData);
-
-    if (paymentType === 'renew') {
-      if (renewMembershipInQueue?.renewIsInQueue) {
-        // Actualizar renewMembershipInQueue si renewIsInQueue es true
-        await profileRef.update({
-          'renewMembershipInQueue.profileRenewTotalReceive': paymentReceived,
-          'renewMembershipInQueue.membership.value': membership,
-        });
-      } else {
-        await profileRef.update(profileUpdateData);
+    if (paymentInfo.profileId) {
+      profileRef = db.collection('profiles').doc(paymentInfo.profileId);
+      const profileSnapshot = await profileRef.get();
+      if (profileSnapshot.exists) {
+        profileData = profileSnapshot.data();
       }
     }
 
-    // Actualizar el perfil según el tipo de pago
-    if (paymentType === 'new') {
-      await profileRef.update(profileUpdateData);
+    // Decide si este pago rige la membresia vigente, la renovacion en cola, o
+    // es un registro ya superado que solo debe corregirse contablemente
+    const scope = classifyPaymentScope(paymentInfo, profileData);
+
+    // Precio del plan elegido, para mantener coherente el precio de la membresia
+    let membershipPrice;
+    if (membership) {
+      const membershipSnapshot = await db
+        .collection('memberships')
+        .doc(membership)
+        .get();
+      if (membershipSnapshot.exists) {
+        membershipPrice = membershipSnapshot.data().price;
+      }
     }
 
-    res.status(200).json({ message: 'Payment data updated successfully' });
+    const paymentUpdateData = {
+      paymentType: paymentType,
+      paymentAmount: amount,
+      paymentDate: paymentDate,
+      lastAdjustedBy: fullName || 'unknown',
+      lastAdjustedAt: admin.firestore.Timestamp.now(),
+    };
+
+    if (membership) {
+      paymentUpdateData.membershipId = membership;
+    }
+
+    // El periodo es un dato del propio pago, asi que se corrige siempre que
+    // llegue; lo que depende del alcance es si se propaga a la membresia
+    if (periodStartDate) paymentUpdateData.paymentStartDate = periodStartDate;
+    if (periodEndDate) paymentUpdateData.paymentEndDate = periodEndDate;
+
+    const membershipUpdate = buildMembershipUpdate({
+      scope,
+      membershipId: membership,
+      paymentAmount: amount,
+      membershipPrice,
+      periodStartDate,
+      periodEndDate,
+    });
+
+    const membershipUpdated = Object.keys(membershipUpdate).length > 0;
+
+    // Pago, membresia y registro de auditoria se escriben juntos: si algo
+    // falla no queda la contabilidad corregida y la membresia a medias
+    const batch = db.batch();
+
+    batch.update(paymentRef, paymentUpdateData);
+
+    if (membershipUpdated && profileRef) {
+      batch.update(profileRef, membershipUpdate);
+    }
+
+    // Registro de auditoria: antes se recibia el nombre del administrador y se
+    // descartaba, asi que no quedaba rastro de quien cambiaba una cifra
+    const adjustmentRef = db.collection('financialAdjustments').doc();
+    batch.set(adjustmentRef, {
+      adjustmentId: adjustmentRef.id,
+      paymentId,
+      gymId: gymId || paymentInfo.gymId || null,
+      profileId: paymentInfo.profileId || null,
+      adjustedBy: fullName || 'unknown',
+      adjustedAt: admin.firestore.Timestamp.now(),
+      scope,
+      membershipUpdated,
+      previousValues: {
+        membershipId: paymentInfo.membershipId || null,
+        paymentAmount: paymentInfo.paymentAmount ?? null,
+        paymentDate: paymentInfo.paymentDate || null,
+        paymentStartDate: paymentInfo.paymentStartDate || null,
+        paymentEndDate: paymentInfo.paymentEndDate || null,
+      },
+      newValues: {
+        membershipId: paymentUpdateData.membershipId ?? null,
+        paymentAmount: amount,
+        paymentDate: paymentDate || null,
+        paymentStartDate: paymentUpdateData.paymentStartDate || null,
+        paymentEndDate: paymentUpdateData.paymentEndDate || null,
+      },
+    });
+
+    await batch.commit();
+
+    return res.status(200).json({
+      message: 'Payment data updated successfully',
+      scope,
+      membershipUpdated,
+    });
   } catch (error) {
     console.error('Error updating payment data:', error);
     res.status(500).send('Error updating payment data');
@@ -410,6 +522,7 @@ const getFinancialPayment = async (req, res) => {
     }
 
     // Obtener información de perfil si existe profileId
+    let profileData = null;
     if (combinedData.profileId) {
       const profileSnapshot = await admin
         .firestore()
@@ -417,15 +530,31 @@ const getFinancialPayment = async (req, res) => {
         .doc(combinedData.profileId)
         .get();
 
-      const profileData = profileSnapshot.exists
-        ? profileSnapshot.data()
-        : null;
+      profileData = profileSnapshot.exists ? profileSnapshot.data() : null;
 
       combinedData.profileName = profileData ? profileData.profileName : null;
       combinedData.profileLastname = profileData
         ? profileData.profileLastname
         : null;
     }
+
+    // Alcance del ajuste, para que el editor pueda avisar al administrador de
+    // si lo que cambie afectara a la membresia del cliente o solo a la
+    // contabilidad
+    combinedData.scope = classifyPaymentScope(paymentData, profileData);
+    combinedData.membershipContext = profileData
+      ? {
+          profileStartDate: profileData.profileStartDate || null,
+          profileEndDate: profileData.profileEndDate || null,
+          currentMembershipId: profileData.membershipId || null,
+          renewIsInQueue:
+            profileData.renewMembershipInQueue?.renewIsInQueue === true,
+          queuedStartDate:
+            profileData.renewMembershipInQueue?.profileRenewStartDate || null,
+          queuedEndDate:
+            profileData.renewMembershipInQueue?.profileRenewEndDate || null,
+        }
+      : null;
 
     // Enviar la respuesta
     res.status(200).json(combinedData);

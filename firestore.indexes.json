@@ -237,6 +237,20 @@
           "order": "ASCENDING"
         },
         {
+          "fieldPath": "paymentDate",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "paymentHistory",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "gymId",
+          "order": "ASCENDING"
+        },
+        {
           "fieldPath": "paymentStartDate",
           "order": "ASCENDING"
         }
@@ -380,6 +394,24 @@
         },
         {
           "fieldPath": "profileStartDate",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "profiles",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "role",
+          "arrayConfig": "CONTAINS"
+        },
+        {
+          "fieldPath": "gymId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "profileLastname",
           "order": "ASCENDING"
         }
       ]

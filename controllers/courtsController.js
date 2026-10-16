@@ -1,6 +1,10 @@
 const express = require('express');
 const app = express();
 const { db } = require('../firebase');
+const {
+  registerCreditUsage,
+  getCurrentCredit,
+} = require('../utils/credits');
 const bodyParser = require('body-parser');
 const admin = require('firebase-admin');
 const moment = require('moment');
@@ -197,9 +201,14 @@ const createSession = async (req, res) => {
       const firstParticipant = body.unknownParticipants[0];
 
       // Obtener los datos del primer participante
-      const { selectedPackage, currentCredit } = firstParticipant;
+      const { selectedPackage } = firstParticipant;
 
-      if (currentCredit === 0) {
+      // El saldo se lee de la base de datos, no del request, y el tope es <= 0
+      const { currentCredit } = await getCurrentCredit(
+        firstParticipant.profileId
+      );
+
+      if (currentCredit <= 0) {
         return res.status(400).json({
           error: 'This member does not have available credit',
         });
@@ -449,14 +458,15 @@ const createSession = async (req, res) => {
       const deductedAtBooking = selectedPackage.deductedAtBooking;
 
       if (deductedAtBooking) {
-        // Restar 1 crédito del currentCredit del memberForm
-        firstParticipant.currentCredit--;
-
-        // Actualizar el currentCredit en el perfil de la persona
-        const profileRef = db.collection('profiles').doc(profileId);
-        await profileRef.update({
-          currentCredit: admin.firestore.FieldValue.increment(-1),
+        // Comprobacion y descuento atomicos, idempotentes por sesion
+        const usage = await registerCreditUsage({
+          profileId,
+          activityId: documentName,
+          reason: 'booking',
+          gymId: body.gymId,
+          shouldDebit: true,
         });
+        firstParticipant.currentCredit = usage.currentCredit;
       }
 
       // Crear un documento en la colección paymentHistory con el paymentAmount y los datos del primer participante
@@ -492,14 +502,15 @@ const createSession = async (req, res) => {
       const deductedAtBooking = selectedPackage.deductedAtBooking;
 
       if (deductedAtBooking) {
-        // Restar 1 crédito del currentCredit del memberForm
-        firstParticipant.currentCredit--;
-
-        // Actualizar el currentCredit en el perfil de la persona
-        const profileRef = db.collection('profiles').doc(profileId);
-        await profileRef.update({
-          currentCredit: admin.firestore.FieldValue.increment(-1),
+        // Comprobacion y descuento atomicos, idempotentes por sesion
+        const usage = await registerCreditUsage({
+          profileId,
+          activityId: documentName,
+          reason: 'booking',
+          gymId: body.gymId,
+          shouldDebit: true,
         });
+        firstParticipant.currentCredit = usage.currentCredit;
       }
     }
     if (feeIsActive && memberType === 'guest') {
@@ -796,9 +807,14 @@ const createCourtAsUnknownMember = async (req, res) => {
     const firstParticipant = body.unknownParticipants[0];
 
     // Obtener los datos del primer participante
-    const { selectedPackage, currentCredit } = firstParticipant;
+    const { selectedPackage } = firstParticipant;
 
-    if (currentCredit === 0) {
+    // El saldo se lee de la base de datos, no del request, y el tope es <= 0
+    const { currentCredit } = await getCurrentCredit(
+      firstParticipant.profileId
+    );
+
+    if (currentCredit <= 0) {
       return res.status(400).json({
         error: 'This member does not have available credit',
       });
@@ -945,14 +961,15 @@ const createCourtAsUnknownMember = async (req, res) => {
       const deductedAtBooking = selectedPackage.deductedAtBooking;
 
       if (deductedAtBooking) {
-        // Restar 1 crédito del currentCredit del memberForm
-        firstParticipant.currentCredit--;
-
-        // Actualizar el currentCredit en el perfil de la persona
-        const profileRef = db.collection('profiles').doc(profileId);
-        await profileRef.update({
-          currentCredit: admin.firestore.FieldValue.increment(-1),
+        // Comprobacion y descuento atomicos, idempotentes por sesion
+        const usage = await registerCreditUsage({
+          profileId,
+          activityId: documentName,
+          reason: 'booking',
+          gymId: body.gymId,
+          shouldDebit: true,
         });
+        firstParticipant.currentCredit = usage.currentCredit;
       }
     }
 

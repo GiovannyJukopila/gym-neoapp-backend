@@ -1,6 +1,10 @@
 const express = require('express');
 const app = express();
 const { db } = require('../firebase');
+const {
+  registerCreditUsage,
+  getCurrentCredit,
+} = require('../utils/credits');
 const { logMovement } = require('../utils/logMovement');
 const bodyParser = require('body-parser');
 const admin = require('firebase-admin');
@@ -892,10 +896,15 @@ const addUnknownParticipants = async (req, res) => {
       });
     }
 
-    const { deductedAtBooking, prepaymentType, currentCredit } =
+    // currentCredit NO es un campo de selectedPackage, es del perfil. Al
+    // desestructurarlo de aqui valia siempre undefined, y como
+    // undefined === 0 es falso, esta guarda nunca llegaba a bloquear nada.
+    const { deductedAtBooking, prepaymentType } =
       participantAdded[0].selectedPackage;
 
-    if (currentCredit === 0) {
+    const { currentCredit } = await getCurrentCredit(profileId);
+
+    if (currentCredit <= 0) {
       return res.status(400).json({
         message: 'Este miembro no tiene crédito disponible',
       });
@@ -908,14 +917,22 @@ const addUnknownParticipants = async (req, res) => {
     }
 
     if (deductedAtBooking) {
-      // Restar 1 crédito del currentCredit del miembro
-      participantAdded[0].currentCredit--;
-
-      // Actualizar el currentCredit en el perfil de la persona
-      const profileRef = db.collection('profiles').doc(profileId);
-      await profileRef.update({
-        currentCredit: admin.firestore.FieldValue.increment(-1),
+      // Comprobacion y descuento atomicos, idempotentes por clase
+      const usage = await registerCreditUsage({
+        profileId,
+        activityId: classId,
+        reason: 'booking',
+        gymId: req.body.gymId,
+        shouldDebit: true,
       });
+
+      if (usage.status === 'no-credit') {
+        return res.status(400).json({
+          message: 'Este miembro no tiene crédito disponible',
+        });
+      }
+
+      participantAdded[0].currentCredit = usage.currentCredit;
     }
 
     // Obtén la referencia a la colección de clases
@@ -2199,11 +2216,15 @@ const addClassUnknownWaitingList = async (req, res) => {
     }
     const participantProfileId = participantAdded.profileId;
 
-    // Validate currentCredit, deductedAtBooking, and prepaymentType
-    const { currentCredit, deductedAtBooking, prepaymentType } =
+    // Validate currentCredit, deductedAtBooking, and prepaymentType.
+    // currentCredit es del perfil, no de selectedPackage: al leerlo de aqui
+    // valia undefined y la guarda nunca bloqueaba.
+    const { deductedAtBooking, prepaymentType } =
       participantAdded.selectedPackage;
 
-    if (currentCredit === 0) {
+    const { currentCredit } = await getCurrentCredit(participantProfileId);
+
+    if (currentCredit <= 0) {
       return res.status(400).json({
         message: 'This member does not have available credit',
       });
@@ -2216,12 +2237,21 @@ const addClassUnknownWaitingList = async (req, res) => {
     }
 
     if (deductedAtBooking) {
-      participantAdded.currentCredit--;
-
-      const profileRef = db.collection('profiles').doc(profileId);
-      await profileRef.update({
-        currentCredit: admin.firestore.FieldValue.increment(-1),
+      const usage = await registerCreditUsage({
+        profileId,
+        activityId: classId,
+        reason: 'booking',
+        gymId: req.body.gymId,
+        shouldDebit: true,
       });
+
+      if (usage.status === 'no-credit') {
+        return res.status(400).json({
+          message: 'This member does not have available credit',
+        });
+      }
+
+      participantAdded.currentCredit = usage.currentCredit;
     }
 
     const classDocRef = db.collection('classes').doc(classId);
@@ -2442,12 +2472,13 @@ const moveNonmemberToBookings = async (req, res) => {
 
       // Descontar el crédito si es necesario
       if (deductedAtBooking) {
-        await db
-          .collection('profiles')
-          .doc(nonMemberProfileId)
-          .update({
-            currentCredit: admin.firestore.FieldValue.increment(-1),
-          });
+        await registerCreditUsage({
+          profileId: nonMemberProfileId,
+          activityId: classId,
+          reason: 'booking',
+          gymId: classData.gymId,
+          shouldDebit: true,
+        });
       }
 
       // Ejecutar el batch
