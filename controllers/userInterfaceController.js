@@ -5,6 +5,15 @@ const {
   registerCreditUsage,
   applyCreditPenalty,
 } = require('../utils/credits');
+const {
+  toPolicy,
+  getClassStartLocal,
+  nextWindowCount,
+  isLateCancellation,
+  evaluateLateCancellation,
+  evaluateNoShow,
+  describeCancellationPolicy,
+} = require('../utils/classPenalties');
 const bodyParser = require('body-parser');
 const admin = require('firebase-admin');
 const QRCode = require('qrcode');
@@ -25,21 +34,45 @@ const sesClient = new SESClient({
 const getUserPenalties = async (req, res) => {
   try {
     const { profileId } = req.params;
+    // ?includeRecent=true: ademas de las activas, las ya cobradas o pagadas de
+    // los ultimos 30 dias. Una penalizacion de creditos que se cobra entera del
+    // saldo nace inactiva, y sin esto no se veia en ningun sitio.
+    const includeRecent = req.query.includeRecent === 'true';
 
-    // Obtener la referencia a la subcolección de penalties dentro del perfil (profile)
-    const penaltiesSnapshot = await db
+    const penaltiesRef = db
       .collection('profiles')
       .doc(profileId)
-      .collection('userPenalties')
-      .where('status', '==', 'active') // Filtrar solo los penalties con status "active"
-      .get();
+      .collection('userPenalties');
 
-    if (penaltiesSnapshot.empty) {
+    let penaltyDocs;
+    if (includeRecent) {
+      const cutoff = new Date(
+        Date.now() - 30 * 24 * 60 * 60 * 1000
+      ).toISOString();
+      const snapshot = await penaltiesRef.get();
+      penaltyDocs = snapshot.docs
+        .filter(
+          (doc) =>
+            doc.data().status === 'active' ||
+            String(doc.data().timestamp || '') >= cutoff
+        )
+        .sort((a, b) =>
+          String(b.data().timestamp || '').localeCompare(
+            String(a.data().timestamp || '')
+          )
+        );
+    } else {
+      // Filtrar solo los penalties con status "active"
+      const snapshot = await penaltiesRef.where('status', '==', 'active').get();
+      penaltyDocs = snapshot.docs;
+    }
+
+    if (penaltyDocs.length === 0) {
       return res.status(404).json({ message: 'No active penalties found' });
     }
 
-    // Extraer los datos de las penalizaciones activas
-    const activePenalties = penaltiesSnapshot.docs.map((doc) => {
+    // Extraer los datos de las penalizaciones
+    const activePenalties = penaltyDocs.map((doc) => {
       const data = doc.data();
       const timestamp = data.timestamp;
 
@@ -502,7 +535,39 @@ const getUnknownMemberClassesByProfileId = async (req, res) => {
       }
     }
 
-    return res.status(200).json(classes);
+    // Politica de cancelacion de cada clase, para que la PWA diga al no miembro
+    // si cancelar le costara creditos antes de que confirme
+    const primaryClassIds = [
+      ...new Set(classes.map((c) => c.primaryClassId).filter(Boolean)),
+    ];
+    const [gymTimeZone, profileDoc, primaryClassDocs] = await Promise.all([
+      getGymTimeZone(gymId),
+      db.collection('profiles').doc(profileId).get(),
+      Promise.all(
+        primaryClassIds.map((id) =>
+          db.collection('primaryClasses').doc(id).get()
+        )
+      ),
+    ]);
+    const restrictionsByPrimaryClass = {};
+    primaryClassDocs.forEach((doc) => {
+      if (doc.exists) {
+        restrictionsByPrimaryClass[doc.id] =
+          doc.data().nonMemberRestrictions || {};
+      }
+    });
+
+    const classesWithPolicy = classes.map((classItem) => ({
+      ...classItem,
+      cancellationPolicy: describeCancellationPolicy({
+        restrictions: restrictionsByPrimaryClass[classItem.primaryClassId],
+        classData: classItem,
+        gymTimeZone,
+        profileData: profileDoc.exists ? profileDoc.data() : {},
+      }),
+    }));
+
+    return res.status(200).json(classesWithPolicy);
   } catch (error) {
     console.error(`Error getting classes: ${error}`);
     return res.status(500).json({ message: 'Error getting classes', error });
@@ -760,292 +825,22 @@ const cancelMemberClass = async (req, res) => {
       primaryClassData = primaryClassDoc.data(); // Asignamos la información de la clase primaria a la variable
     }
 
-    if (
-      primaryClassData?.memberRestrictions?.restrictions &&
-      role === 'member'
-    ) {
-      const profileRef = db.collection('profiles').doc(profileId);
-      const profileDoc = await profileRef.get();
+    // Penalizacion por cancelacion tardia segun lo que el manager configuro en
+    // la clase primaria para cada tipo de socio (ver utils/classPenalties)
+    const profileFound = await handleClassCancellation({
+      audience: role === 'member' ? 'member' : 'nonMember',
+      profileId,
+      gymId,
+      classId,
+      classData,
+      restrictions:
+        role === 'member'
+          ? primaryClassData?.memberRestrictions
+          : primaryClassData?.nonMemberRestrictions,
+    });
 
-      if (!profileDoc.exists) {
-        return res.status(404).json({ error: 'Profile not found' });
-      }
-
-      const profileData = profileDoc.data();
-      const { first30DaysClassCancelation = null, cancellationCount = 0 } =
-        profileData;
-
-      const gymTimeZone = await getGymTimeZone(gymId);
-
-      // Obtener la hora local en la zona horaria del gimnasio
-      const localNow = getLocalTime(new Date(), gymTimeZone); // Pasamos el timestamp actual ajustado a moment
-      let first30DaysDate;
-
-      if (!first30DaysClassCancelation) {
-        // Si no hay fecha de primera cancelación, establecer la fecha actual
-        first30DaysDate = localNow;
-        await profileRef.update({
-          first30DaysClassCancelation: localNow.toISOString(), // Guardar la fecha en formato ISO
-        });
-      } else {
-        // Si ya existe una fecha, convertirla en objeto Date
-        first30DaysDate = new Date(first30DaysClassCancelation);
-      }
-
-      // Calcular la diferencia en milisegundos
-      const diffMs = localNow.getTime() - first30DaysDate.getTime();
-
-      // Convertir la diferencia a días
-      const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-
-      let updatedCancellationCount = cancellationCount + 1;
-      let penaltyDetails = null;
-
-      const classStartTime = classData.startTime; // "11:00"
-      const classEventDate = new Date(classData.eventDate); // "2024-09-25T00:00:00.000Z"
-
-      // Validar si el usuario está dentro del tiempo permitido para cancelar sin penalización
-      let penaltyWaiveTime = null;
-      if (primaryClassData.memberRestrictions.penaltyWaiveUnit === 'days') {
-        penaltyWaiveTime =
-          primaryClassData.memberRestrictions.penaltyWaiveDays *
-          24 *
-          60 *
-          60 *
-          1000; // Convertir días a milisegundos
-      } else if (
-        primaryClassData.memberRestrictions.penaltyWaiveUnit === 'hours'
-      ) {
-        penaltyWaiveTime =
-          primaryClassData.memberRestrictions.penaltyWaiveHours *
-          60 *
-          60 *
-          1000; // Convertir horas a milisegundos
-      }
-
-      // Calcular el tiempo hasta el inicio de la clase
-      const timeUntilClassStart = classEventDate.getTime() - localNow.getTime();
-
-      if (diffDays > 30) {
-        // Resetear el contador de cancelaciones y actualizar la fecha
-        updatedCancellationCount = 1;
-        await profileRef.update({
-          first30DaysClassCancelation: localNow.toISOString(), // Guardar la fecha en formato ISO
-          cancellationCount: updatedCancellationCount,
-        });
-      } else {
-        // Incrementar el contador de cancelaciones
-        await profileRef.update({
-          cancellationCount: updatedCancellationCount,
-        });
-
-        const maxCancellations =
-          primaryClassData.memberRestrictions.maxCancellationsPer30Days;
-        if (
-          maxCancellations &&
-          (updatedCancellationCount > maxCancellations ||
-            timeUntilClassStart <= penaltyWaiveTime)
-        ) {
-          const penaltyType = primaryClassData.memberRestrictions.penaltyType; // Obtener el tipo de penalización
-          let penaltyAmount = 0;
-          let reason = '';
-
-          if (penaltyType === 'monetary') {
-            penaltyAmount = primaryClassData.memberRestrictions.monetaryAmount;
-          } else if (penaltyType === 'timeRestriction') {
-            penaltyAmount =
-              primaryClassData.memberRestrictions.timeRestrictionDays;
-          }
-
-          if (updatedCancellationCount > maxCancellations) {
-            reason = `Exceeded the maximum allowed cancellations of ${maxCancellations} within 30 days.`;
-          } else if (timeUntilClassStart <= penaltyWaiveTime) {
-            const penaltyUnit =
-              primaryClassData.memberRestrictions.penaltyWaiveUnit;
-            const penaltyWaiveValue =
-              penaltyUnit === 'hours'
-                ? primaryClassData.memberRestrictions.penaltyWaiveHours
-                : primaryClassData.memberRestrictions.penaltyWaiveDays;
-
-            reason = `Cancellation occurred less than ${penaltyWaiveValue} ${penaltyUnit} before the class started.`;
-          }
-
-          await profileRef.update({
-            penaltyActive: true, // Establecer penaltyActive a true cuando se impone una penalización
-          });
-
-          const penaltyDetails = {
-            type: penaltyType,
-            amount: penaltyAmount,
-            reason,
-          };
-
-          await logUserPenalty(
-            profileId,
-            gymId,
-            penaltyDetails.type,
-            penaltyDetails,
-            true
-          );
-        }
-      }
-
-      // Registrar la actividad de la cancelación
-      await logUserActivity(profileId, gymId, 'classCancellation', [classId]);
-    }
-
-    if (
-      primaryClassData?.nonMemberRestrictions?.restrictions &&
-      role === 'unknownMember'
-    ) {
-      const profileRef = db.collection('profiles').doc(profileId);
-      const profileDoc = await profileRef.get();
-
-      if (!profileDoc.exists) {
-        return res.status(404).json({ error: 'Profile not found' });
-      }
-
-      const profileData = profileDoc.data();
-      const { first30DaysClassCancelation = null, cancellationCount = 0 } =
-        profileData;
-
-      const gymTimeZone = await getGymTimeZone(gymId);
-
-      // Obtener la hora local en la zona horaria del gimnasio
-      const localNow = getLocalTime(new Date(), gymTimeZone); // Pasamos el timestamp actual ajustado a moment
-      let first30DaysDate;
-
-      if (!first30DaysClassCancelation) {
-        // Si no hay fecha de primera cancelación, establecer la fecha actual
-        first30DaysDate = localNow;
-        await profileRef.update({
-          first30DaysClassCancelation: localNow.toISOString(), // Guardar la fecha en formato ISO
-        });
-      } else {
-        // Si ya existe una fecha, convertirla en objeto Date
-        first30DaysDate = new Date(first30DaysClassCancelation);
-      }
-
-      // Calcular la diferencia en milisegundos
-      const diffMs = localNow.getTime() - first30DaysDate.getTime();
-
-      // Convertir la diferencia a días
-      const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-
-      let updatedCancellationCount = cancellationCount + 1;
-
-      const classStartTime = classData.startTime; // "11:00"
-      const classEventDate = new Date(classData.eventDate); // "2024-09-25T00:00:00.000Z"
-
-      // Validar si el usuario está dentro del tiempo permitido para cancelar sin penalización
-      let penaltyWaiveTime = null;
-      if (
-        primaryClassData.nonMemberRestrictions.penaltyNonMemberWaiveUnit ===
-        'days'
-      ) {
-        penaltyWaiveTime =
-          primaryClassData.nonMemberRestrictions.penaltyNonMemberWaiveDays *
-          24 *
-          60 *
-          60 *
-          1000; // Convertir días a milisegundos
-      } else if (
-        primaryClassData.nonMemberRestrictions.penaltyNonMemberWaiveUnit ===
-        'hours'
-      ) {
-        penaltyWaiveTime =
-          primaryClassData.nonMemberRestrictions.penaltyNonMemberWaiveHours *
-          60 *
-          60 *
-          1000; // Convertir horas a milisegundos
-      }
-
-      // Calcular el tiempo hasta el inicio de la clase
-      const timeUntilClassStart = classEventDate.getTime() - localNow.getTime();
-
-      if (diffDays > 30) {
-        // Resetear el contador de cancelaciones y actualizar la fecha
-        updatedCancellationCount = 1;
-        await profileRef.update({
-          first30DaysClassCancelation: localNow.toISOString(), // Guardar la fecha en formato ISO
-          cancellationCount: updatedCancellationCount,
-        });
-      } else {
-        // Incrementar el contador de cancelaciones
-        await profileRef.update({
-          cancellationCount: updatedCancellationCount,
-        });
-
-        const maxCancellations =
-          primaryClassData.nonMemberRestrictions.maxNonMembersCancellations;
-
-        if (
-          maxCancellations &&
-          (updatedCancellationCount > maxCancellations ||
-            timeUntilClassStart <= penaltyWaiveTime)
-        ) {
-          const nonMemberCreditsPenalty =
-            primaryClassData.nonMemberRestrictions.nonMemberCreditsPenalty;
-
-          if (nonMemberCreditsPenalty && nonMemberCreditsPenalty > 0) {
-            const penaltyAmount = nonMemberCreditsPenalty;
-            let reason = '';
-
-            if (updatedCancellationCount > maxCancellations) {
-              reason = `Exceeded the maximum allowed cancellations of ${maxCancellations} within 30 days.`;
-            } else if (timeUntilClassStart <= penaltyWaiveTime) {
-              const penaltyUnit =
-                primaryClassData.nonMemberRestrictions
-                  .penaltyNonMemberWaiveUnit;
-              const penaltyWaiveValue =
-                penaltyUnit === 'hours'
-                  ? primaryClassData.nonMemberRestrictions
-                      .penaltyNonMemberWaiveHours
-                  : primaryClassData.nonMemberRestrictions
-                      .penaltyNonMemberWaiveDays;
-
-              reason = `Cancellation occurred less than ${penaltyWaiveValue} ${penaltyUnit} before the class started.`;
-            }
-
-            // Se cobra hasta donde alcanza el saldo y el resto queda como
-            // deuda en creditDebt. El saldo nunca baja de 0, asi que un
-            // negativo en la base de datos ya solo puede ser un fallo.
-            const penaltyResult = await applyCreditPenalty({
-              profileId,
-              penaltyAmount,
-            });
-            await profileRef.update({ penaltyActive: true });
-            const penaltyDetails = {
-              type: 'creditsPenalty',
-              amount: penaltyAmount,
-              reason,
-            };
-            // Queda pendiente de cobro: antes se deducia de un saldo negativo
-            const penaltyStatus = penaltyResult.creditDebt > 0;
-
-            await logUserPenalty(
-              profileId,
-              gymId,
-              penaltyDetails.type,
-              penaltyDetails,
-              penaltyStatus // Pasar el estado como argumento
-            );
-          }
-        }
-
-        if (
-          profileData.selectedPackage.deductedAtBooking &&
-          timeUntilClassStart > penaltyWaiveTime
-        ) {
-          const updatedCredits = profileData.currentCredit + 1;
-          await profileRef.update({
-            currentCredit: updatedCredits,
-          });
-        }
-      }
-
-      // Registrar la actividad de la cancelación
-      await logUserActivity(profileId, gymId, 'classCancellation', [classId]);
+    if (!profileFound) {
+      return res.status(404).json({ error: 'Profile not found' });
     }
 
     // Procesar la lista de espera
@@ -1840,170 +1635,218 @@ const penalizeNoShows = async (gymId) => {
   }
 };
 
-const applyMemberPenalty = async (participantId, primaryClass) => {
-  const profileRef = admin
-    .firestore()
+/**
+ * Registra una penalizacion a un miembro: multa (queda pendiente de pago) o
+ * dias sin poder reservar. Mientras este activa, el miembro no puede reservar.
+ */
+const chargeMemberPenalty = async ({ profileId, gymId, penalty, reason }) => {
+  await db
     .collection('profiles')
-    .doc(participantId);
-  const profileDoc = await profileRef.get();
+    .doc(profileId)
+    .update({ penaltyActive: true });
 
-  if (!profileDoc.exists) {
-    console.error(`Perfil no encontrado para miembro ${participantId}`);
-    return;
-  }
+  const penaltyDetails = {
+    type: penalty.type,
+    amount: penalty.amount,
+    reason,
+  };
 
-  const profileData = profileDoc.data();
-  const { first30DaysNoShow = null, noShowCount = 0 } = profileData;
-
-  const gymTimeZone = await getGymTimeZone(primaryClass.gymId);
-  const localNow = getLocalTime(new Date(), gymTimeZone);
-  let first30DaysDate;
-
-  // Manejo de no-shows
-  if (!first30DaysNoShow) {
-    first30DaysDate = localNow;
-    await profileRef.update({ first30DaysNoShow: localNow.toISOString() });
-  } else {
-    first30DaysDate = new Date(first30DaysNoShow);
-  }
-
-  const diffMs = localNow.getTime() - first30DaysDate.getTime();
-  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-  let updatedNoShowCount = noShowCount + 1;
-
-  if (diffDays > 30) {
-    updatedNoShowCount = 1;
-    await profileRef.update({
-      first30DaysNoShow: localNow.toISOString(),
-      noShowCount: updatedNoShowCount,
-    });
-  } else {
-    await profileRef.update({ noShowCount: updatedNoShowCount });
-
-    const maxNoShows = primaryClass.memberRestrictions.maxNoShowPer30Days;
-    const penaltyType = primaryClass.memberRestrictions.penaltyType;
-
-    if (updatedNoShowCount > maxNoShows) {
-      let penaltyAmount = 0;
-      let reason = '';
-
-      if (penaltyType === 'monetary') {
-        penaltyAmount = primaryClass.memberRestrictions.monetaryAmount;
-      } else if (penaltyType === 'timeRestriction') {
-        penaltyAmount = primaryClass.memberRestrictions.timeRestrictionDays;
-      }
-
-      const penaltyDetails = {
-        type: penaltyType,
-        amount: penaltyAmount,
-        reason: `Exceeded the maximum allowed no-shows of ${maxNoShows} within 30 days.`,
-      };
-
-      // Actualizar créditos o penalización
-      await profileRef.update({
-        penaltyActive: true,
-      });
-
-      await logUserPenalty(
-        participantId,
-        primaryClass.gymId,
-        penaltyDetails.type,
-        penaltyDetails,
-        true
-      );
-    }
-  }
-
-  // Registrar la actividad de no-show
-  await logUserActivity(participantId, primaryClass.gymId, 'noShow', [
-    primaryClass.classId,
-  ]);
+  await logUserPenalty(profileId, gymId, penalty.type, penaltyDetails, true);
 };
 
-const applyNonMemberPenalty = async (participantId, primaryClass) => {
-  const profileRef = admin
-    .firestore()
-    .collection('profiles')
-    .doc(participantId);
+/**
+ * Cobra a un no miembro una penalizacion en creditos. Lo que no alcanza el
+ * saldo queda como deuda (creditDebt): en ese caso la penalizacion queda activa
+ * hasta que se liquide al comprar el siguiente paquete. Si se cobro entera, se
+ * registra como ya cobrada (inactive) y no marca el perfil como penalizado.
+ */
+const chargeNonMemberPenalty = async ({ profileId, gymId, penalty, reason }) => {
+  const penaltyResult = await applyCreditPenalty({
+    profileId,
+    penaltyAmount: penalty.amount,
+  });
+  const pendingDebt = penaltyResult.addedToDebt > 0;
+
+  // penaltyActive solo se enciende aqui; lo apagan el pago o la renovacion
+  if (pendingDebt) {
+    await db
+      .collection('profiles')
+      .doc(profileId)
+      .update({ penaltyActive: true });
+  }
+
+  const penaltyDetails = {
+    type: 'creditsPenalty',
+    amount: penalty.amount,
+    reason,
+    charged: penaltyResult.charged,
+    addedToDebt: penaltyResult.addedToDebt,
+  };
+
+  await logUserPenalty(
+    profileId,
+    gymId,
+    penaltyDetails.type,
+    penaltyDetails,
+    pendingDebt
+  );
+};
+
+const chargePenalty = (audience, args) =>
+  audience === 'member'
+    ? chargeMemberPenalty(args)
+    : chargeNonMemberPenalty(args);
+
+/**
+ * Cancelacion de una clase (miembro o no miembro):
+ *  - a tiempo: gratis, no cuenta para nada y, si el paquete descuenta al
+ *    reservar, se devuelve el credito;
+ *  - tardia: cuenta en la ventana de 30 dias y se penaliza cuando supera las
+ *    cancelaciones tardias permitidas por el manager.
+ *
+ * @returns {Promise<boolean>} false si el perfil no existe
+ */
+const handleClassCancellation = async ({
+  audience,
+  profileId,
+  gymId,
+  classId,
+  classData,
+  restrictions,
+}) => {
+  const profileRef = db.collection('profiles').doc(profileId);
+  const profileDoc = await profileRef.get();
+
+  if (!profileDoc.exists) return false;
+
+  const profileData = profileDoc.data();
+  const policy = toPolicy(restrictions, audience);
+  const gymTimeZone = await getGymTimeZone(gymId);
+  const localNow = getLocalTime(new Date(), gymTimeZone);
+
+  const isLate = isLateCancellation({
+    policy,
+    timeUntilClassMs:
+      getClassStartLocal(classData).getTime() - localNow.getTime(),
+  });
+
+  if (isLate) {
+    const window = nextWindowCount({
+      windowStart: profileData.first30DaysLateCancellation,
+      count: profileData.lateCancellationCount,
+      now: localNow,
+    });
+
+    await profileRef.update({
+      first30DaysLateCancellation: window.windowStart,
+      lateCancellationCount: window.count,
+    });
+
+    const decision = evaluateLateCancellation({
+      policy,
+      lateCancellationCount: window.count,
+    });
+
+    if (decision.penalize) {
+      await chargePenalty(audience, {
+        profileId,
+        gymId,
+        penalty: decision.penalty,
+        reason: decision.reason,
+      });
+    }
+  } else if (
+    audience === 'nonMember' &&
+    profileData.selectedPackage?.deductedAtBooking
+  ) {
+    // Cancelo a tiempo: se devuelve el credito descontado al reservar
+    await profileRef.update({
+      currentCredit: admin.firestore.FieldValue.increment(1),
+    });
+  }
+
+  await logUserActivity(profileId, gymId, 'classCancellation', [classId]);
+  return true;
+};
+
+/**
+ * No show (lo llama la tarea nocturna): cuenta en la ventana de 30 dias y se
+ * penaliza cuando supera los no shows permitidos por el manager.
+ */
+const handleNoShow = async ({
+  audience,
+  participantId,
+  primaryClass,
+  windowStartField,
+}) => {
+  const profileRef = db.collection('profiles').doc(participantId);
   const profileDoc = await profileRef.get();
 
   if (!profileDoc.exists) {
-    console.error(`Perfil no encontrado para no miembro ${participantId}`);
+    console.error(`Perfil no encontrado para ${audience} ${participantId}`);
     return;
   }
 
-  const profileData = profileDoc.data();
-  const {
-    noShowCount = 0,
-    first30DaysClassNoShow = null,
-    currentCredit = 0,
-  } = profileData;
+  const policy = toPolicy(
+    audience === 'member'
+      ? primaryClass.memberRestrictions
+      : primaryClass.nonMemberRestrictions,
+    audience
+  );
 
-  const gymTimeZone = await getGymTimeZone(primaryClass.gymId);
-  const localNow = getLocalTime(new Date(), gymTimeZone);
-  let first30DaysDate;
+  // Clase sin restricciones para este tipo de socio: el no show no cuenta
+  if (policy.enabled) {
+    const profileData = profileDoc.data();
+    const gymTimeZone = await getGymTimeZone(primaryClass.gymId);
+    const localNow = getLocalTime(new Date(), gymTimeZone);
 
-  // Manejo de No Shows
-  if (!first30DaysClassNoShow) {
-    first30DaysDate = localNow;
-    await profileRef.update({ first30DaysClassNoShow: localNow.toISOString() });
-  } else {
-    first30DaysDate = new Date(first30DaysClassNoShow);
-  }
-
-  const noShowDiffMs = localNow.getTime() - first30DaysDate.getTime();
-  const noShowDiffDays = Math.floor(noShowDiffMs / (1000 * 60 * 60 * 24));
-  let updatedNoShowCount = noShowCount + 1;
-
-  if (noShowDiffDays > 30) {
-    updatedNoShowCount = 1; // Reiniciar el conteo de no shows
-    await profileRef.update({
-      first30DaysClassNoShow: localNow.toISOString(),
-      noShowCount: updatedNoShowCount,
+    // Antes, el no show que reiniciaba la ventana de 30 dias no se evaluaba
+    const window = nextWindowCount({
+      windowStart: profileData[windowStartField],
+      count: profileData.noShowCount,
+      now: localNow,
     });
-  } else {
-    await profileRef.update({ noShowCount: updatedNoShowCount });
 
-    const maxNonMembersNoShows =
-      primaryClass.nonMemberRestrictions.maxNonMembersNoShows;
-    const nonMemberCreditsPenalty =
-      primaryClass.nonMemberRestrictions.nonMemberCreditsPenalty;
+    await profileRef.update({
+      [windowStartField]: window.windowStart,
+      noShowCount: window.count,
+    });
 
-    if (updatedNoShowCount > maxNonMembersNoShows) {
-      const penaltyAmount = nonMemberCreditsPenalty;
+    const decision = evaluateNoShow({ policy, noShowCount: window.count });
 
-      // Igual que en la cancelacion tardia: lo que no se puede cobrar del
-      // saldo queda como deuda, nunca como saldo negativo
-      const penaltyResult = await applyCreditPenalty({
+    if (decision.penalize) {
+      await chargePenalty(audience, {
         profileId: participantId,
-        penaltyAmount,
+        gymId: primaryClass.gymId,
+        penalty: decision.penalty,
+        reason: decision.reason,
       });
-
-      await profileRef.update({ penaltyActive: true });
-
-      const penaltyDetails = {
-        type: 'creditsPenalty',
-        amount: penaltyAmount,
-        reason: `Exceeded the maximum allowed no shows of ${maxNonMembersNoShows} within 30 days.`,
-      };
-
-      const penaltyStatus = penaltyResult.creditDebt > 0;
-
-      await logUserPenalty(
-        participantId,
-        primaryClass.gymId,
-        penaltyDetails.type,
-        penaltyDetails,
-        penaltyStatus
-      );
     }
   }
 
-  // Registrar la actividad de No Show
-  await logUserActivity(participantId, primaryClass.gymId, 'classNoShow', [
-    primaryClass.classId,
-  ]);
+  await logUserActivity(
+    participantId,
+    primaryClass.gymId,
+    audience === 'member' ? 'noShow' : 'classNoShow',
+    [primaryClass.classId]
+  );
 };
+
+const applyMemberPenalty = (participantId, primaryClass) =>
+  handleNoShow({
+    audience: 'member',
+    participantId,
+    primaryClass,
+    windowStartField: 'first30DaysNoShow',
+  });
+
+const applyNonMemberPenalty = (participantId, primaryClass) =>
+  handleNoShow({
+    audience: 'nonMember',
+    participantId,
+    primaryClass,
+    windowStartField: 'first30DaysClassNoShow',
+  });
 
 const checkAndDeactivatePenalties = async (gymId) => {
   try {
