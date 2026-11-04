@@ -10,6 +10,46 @@ const gymFor = (staff, requestedGym) =>
     ? requestedGym
     : staff.gymId;
 
+// ---- Equipo NeoApp: su actividad no la ve nadie ----
+// Ya no se registra (utils/activityEntry.js); esto oculta las entradas que se
+// guardaron antes
+
+const NEOAPP_CACHE_MS = 10 * 60 * 1000;
+let neoAppCache = { ids: new Set(), loadedAt: 0 };
+
+// 2 consultas pequeñas cada 10 min
+const neoAppProfileIds = async () => {
+  if (Date.now() - neoAppCache.loadedAt < NEOAPP_CACHE_MS) {
+    return neoAppCache.ids;
+  }
+  try {
+    const [byLevel, byRole] = await Promise.all([
+      db
+        .collection('profiles')
+        .where('profileAdminLevel', 'in', [3, 4, '3', '4'])
+        .select()
+        .get(),
+      db
+        .collection('profiles')
+        .where('role', 'array-contains-any', ['masteradmin', 'superadmin'])
+        .select()
+        .get(),
+    ]);
+    neoAppCache = {
+      ids: new Set([...byLevel.docs, ...byRole.docs].map((doc) => doc.id)),
+      loadedAt: Date.now(),
+    };
+  } catch (error) {
+    console.error('[activity] Could not load NeoApp team:', error.message);
+  }
+  return neoAppCache.ids;
+};
+
+const isNeoAppEntry = (data, neoAppIds) => neoAppIds.has(data.actor?.profileId);
+
+// Si se ocultan entradas, se sigue leyendo hasta llenar la pagina
+const MAX_ROUNDS = 5;
+
 const toIso = (value) =>
   typeof value?.toDate === 'function' ? value.toDate().toISOString() : '';
 
@@ -24,7 +64,8 @@ const toIso = (value) =>
  *   cursor                       id de la ultima entrada de la pagina anterior
  *   limit                        30 por defecto
  *
- * Coste: una lectura por entrada devuelta (+1 por el cursor).
+ * Coste: una lectura por entrada leida (+1 por el cursor). Se saltan las
+ * entradas antiguas del equipo NeoApp.
  */
 const getActivity = async (req, res) => {
   try {
@@ -53,16 +94,40 @@ const getActivity = async (req, res) => {
 
     query = query.orderBy('at', 'desc');
 
+    // Lo que hizo el equipo NeoApp no se enseña
+    const neoAppIds = await neoAppProfileIds();
+    if (actorId && neoAppIds.has(String(actorId))) {
+      return res.json({ items: [], nextCursor: null });
+    }
+
+    let last = null;
     if (cursor) {
       const cursorDoc = await db
         .collection(ACTIVITY_COLLECTION)
         .doc(String(cursor))
         .get();
-      if (cursorDoc.exists) query = query.startAfter(cursorDoc);
+      if (cursorDoc.exists) last = cursorDoc;
     }
 
-    const snapshot = await query.limit(limit + 1).get();
-    const docs = snapshot.docs.slice(0, limit);
+    const docs = [];
+    let nextCursor = null;
+    for (let round = 0; round < MAX_ROUNDS; round++) {
+      const page = last ? query.startAfter(last) : query;
+      const snapshot = await page.limit(limit + 1).get();
+
+      for (const doc of snapshot.docs) {
+        if (docs.length === limit) {
+          // Queda al menos otra entrada: hay pagina siguiente
+          nextCursor = last.id;
+          break;
+        }
+        last = doc;
+        if (!isNeoAppEntry(doc.data(), neoAppIds)) docs.push(doc);
+      }
+      if (nextCursor || snapshot.docs.length <= limit) break;
+      // Ronda llena de entradas ocultas: si es la ultima, se sigue en otra pagina
+      if (round === MAX_ROUNDS - 1) nextCursor = last.id;
+    }
 
     res.json({
       items: docs.map((doc) => {
@@ -79,8 +144,7 @@ const getActivity = async (req, res) => {
           details: data.details || [],
         };
       }),
-      nextCursor:
-        snapshot.docs.length > limit ? docs[docs.length - 1].id : null,
+      nextCursor,
     });
   } catch (error) {
     // Falta un indice compuesto: Firestore indica en el mensaje como crearlo
@@ -117,8 +181,10 @@ const getActivityStaff = async (req, res) => {
         .get(),
     ]);
 
+    const neoAppIds = await neoAppProfileIds();
     const staff = new Map();
     [...admins.docs, ...trainers.docs].forEach((doc) => {
+      if (neoAppIds.has(doc.id)) return;
       const data = doc.data();
       staff.set(doc.id, {
         profileId: doc.id,

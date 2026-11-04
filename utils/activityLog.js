@@ -19,7 +19,7 @@
  *   details    [{ label, value }]  datos de contexto (plan, importe...)
  *
  * Solo se añaden entradas: no hay forma de editarlas ni borrarlas desde la
- * app. Escribir el registro nunca hace fallar la accion del usuario.
+ * app. Lo que hace el equipo NeoApp (desarrollo y soporte) no se registra. Escribir el registro nunca hace fallar la accion del usuario.
  */
 const admin = require('firebase-admin');
 const { db } = require('../firebase');

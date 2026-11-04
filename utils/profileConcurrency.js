@@ -22,6 +22,8 @@
  * cambio es intencional o si su pantalla estaba desactualizada.
  */
 
+const admin = require('firebase-admin');
+
 const MEMBERSHIP_FIELDS = [
   'membershipId',
   'profileStartDate',
@@ -150,16 +152,21 @@ const membershipChanged = (before, after) =>
 
 /**
  * @param {string} action          'Profile edited', 'Renewal', 'Freeze'...
- * @param {object} [changedBy]      { profileId, name } de quien lo hizo
+ * @param {object} [changedBy]      { profileId, name, isNeoApp } de quien lo hizo
  * @param {object} resultingProfile perfil tal como queda tras el cambio
  */
-const buildMembershipStamp = (action, changedBy, resultingProfile) => ({
-  action,
-  byProfileId: cleanText(changedBy?.profileId),
-  byName: cleanText(changedBy?.name),
-  at: new Date().toISOString(),
-  values: membershipSnapshot(resultingProfile),
-});
+const buildMembershipStamp = (action, changedBy, resultingProfile) =>
+  // El equipo NeoApp no deja rastro: se quita la marca anterior (si se quedara
+  // y coincidieran los valores, el cambio se atribuiria a otra persona)
+  changedBy?.isNeoApp
+    ? admin.firestore.FieldValue.delete()
+    : {
+        action,
+        byProfileId: cleanText(changedBy?.profileId),
+        byName: cleanText(changedBy?.name),
+        at: new Date().toISOString(),
+        values: membershipSnapshot(resultingProfile),
+      };
 
 // Devuelve el ultimo cambio registrado solo si sigue siendo el vigente
 const describeLastChange = (profile) => {

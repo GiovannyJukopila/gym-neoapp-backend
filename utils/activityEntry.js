@@ -240,6 +240,8 @@ const ENTITY_TYPES = {
  */
 const writeEntries = async (ctx, actor, info = {}, options = {}) => {
   const changes = ctx.changes.splice(0);
+  // El equipo NeoApp (desarrollo y soporte) no aparece en la actividad
+  if (actor?.isNeoApp) return null;
   const documents = await resolveReferences(toDocuments(changes));
   const catalog = ctx.match?.entry;
 

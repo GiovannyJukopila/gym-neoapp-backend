@@ -116,8 +116,19 @@ const requireMaster = (req, res, next) => {
 // Tras borrar o cambiar a un admin, que no siga valiendo lo guardado en memoria
 const forgetStaff = (profileId) => staffCache.delete(profileId);
 
+// Equipo NeoApp (desarrollo y soporte): no deja rastro de lo que hace
+const isNeoAppProfile = async (profileId) => {
+  if (!profileId) return false;
+  try {
+    return (await loadStaff(profileId))?.isNeoApp === true;
+  } catch (error) {
+    return false;
+  }
+};
+
 module.exports = {
   requireStaff,
   requireMaster,
   forgetStaff,
+  isNeoAppProfile,
 };

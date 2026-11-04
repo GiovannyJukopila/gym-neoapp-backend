@@ -8,6 +8,7 @@ const {
 const bodyParser = require('body-parser');
 const jwt = require('jsonwebtoken');
 const admin = require('firebase-admin');
+const { isNeoAppProfile } = require('../middlewares/staffAuth');
 const moment = require('moment-timezone');
 
 app.use(bodyParser.json());
@@ -427,9 +428,11 @@ const updateFinancial = async (req, res) => {
     }
 
     // Registro de auditoria: antes se recibia el nombre del administrador y se
-    // descartaba, asi que no quedaba rastro de quien cambiaba una cifra
+    // descartaba, asi que no quedaba rastro de quien cambiaba una cifra.
+    // El equipo NeoApp no deja rastro
+    const recordAdjustment = !(await isNeoAppProfile(req.user?.profileId));
     const adjustmentRef = db.collection('financialAdjustments').doc();
-    batch.set(adjustmentRef, {
+    if (recordAdjustment) batch.set(adjustmentRef, {
       adjustmentId: adjustmentRef.id,
       paymentId,
       gymId: gymId || paymentInfo.gymId || null,
