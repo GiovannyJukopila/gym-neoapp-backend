@@ -1,8 +1,10 @@
 rules_version = '2';
 
-// Craft rules based on data in your Firestore database
-// allow write: if firestore.get(
-//    /databases/(default)/documents/users/$(request.auth.uid)).data.isAdmin;
+// Nadie accede a los archivos directamente desde internet.
+//
+// El backend sube y borra con la cuenta de servicio (firebase-admin), que no
+// pasa por estas reglas, y entrega enlaces firmados (getSignedUrl) que siguen
+// funcionando con las reglas cerradas.
 service firebase.storage {
   match /b/{bucket}/o {
     match /{allPaths=**} {

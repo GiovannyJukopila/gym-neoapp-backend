@@ -20,6 +20,10 @@ const {
   shouldApplyRenewalNow,
   buildProfileFromRenewal,
 } = require('../utils/membershipRenewal');
+const { buildMembershipStamp } = require('../utils/profileConcurrency');
+
+// Los cambios del proceso diario quedan registrados como automaticos
+const AUTOMATIC_CHANGE = { name: 'NeoApp (automatic)' };
 
 const getTotalMembers = async (req, res) => {
   try {
@@ -607,12 +611,20 @@ const setInactiveMembers = async (gymId) => {
 
       // 1. La renovacion en cola ya rige: se cambia el plan y queda activo
       if (shouldApplyRenewalNow(profileData, today)) {
+        const renewal = buildProfileFromRenewal(
+          profileData.renewMembershipInQueue,
+          today
+        );
         writes.push({
           ref: doc.ref,
-          data: buildProfileFromRenewal(
-            profileData.renewMembershipInQueue,
-            today
-          ),
+          data: {
+            ...renewal,
+            membershipLastChange: buildMembershipStamp(
+              'Renewal started',
+              AUTOMATIC_CHANGE,
+              { ...profileData, ...renewal }
+            ),
+          },
         });
         renewalsApplied += 1;
         return;
@@ -628,7 +640,17 @@ const setInactiveMembers = async (gymId) => {
 
       if (profileData.profileStatus === profileStatus) return;
 
-      writes.push({ ref: doc.ref, data: { profileStatus } });
+      writes.push({
+        ref: doc.ref,
+        data: {
+          profileStatus,
+          membershipLastChange: buildMembershipStamp(
+            profileStatus === 'true' ? 'Activated' : 'Expired',
+            AUTOMATIC_CHANGE,
+            { ...profileData, profileStatus }
+          ),
+        },
+      });
       statusesUpdated += 1;
     });
 

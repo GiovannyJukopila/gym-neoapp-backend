@@ -23,6 +23,42 @@ const {
   prefixVariants,
   rankProfiles,
 } = require('../utils/nameSearch');
+const {
+  findMembershipConflicts,
+  describeMembershipChanges,
+  membershipChanged,
+  buildMembershipStamp,
+  describeLastChange,
+} = require('../utils/profileConcurrency');
+
+// Estado de membresia que el panel necesita para ponerse al dia tras un
+// guardado rechazado (mismo formato de fechas que getProfile)
+const MEMBERSHIP_STATE_FIELDS = [
+  'membershipId',
+  'profileStartDate',
+  'profileEndDate',
+  'profileStatus',
+  'profileLastMembershipPrice',
+  'profileTotalReceive',
+  'profileWasDiscount',
+  'profileWasComplementary',
+  'profileComplementaryReason',
+  'profileDiscountType',
+  'profileDiscountPercentage',
+  'profileDiscountValue',
+  'profileIsACouple',
+  'profileCoupleName',
+  'profileCoupleEmail',
+  'renewMembershipInQueue',
+  'profileRenewStartDate',
+  'profileFrozen',
+  'profileFrozenStartDate',
+];
+const DATE_STATE_FIELDS = [
+  'profileStartDate',
+  'profileEndDate',
+  'profileFrozenStartDate',
+];
 
 const createProfile = async (req, res) => {
   try {
@@ -385,57 +421,90 @@ const getProfileByEmail = async (req, res) => {
 
 const updateProfile = async (req, res) => {
   try {
-    const { profileCode, formData } = req.body;
+    const { profileCode, formData, originalValues } = req.body;
+    // Quien guarda, segun su sesion (lo deja middlewares/staffAuth.js)
+    const changedBy = req.staff;
 
     const profileRef = admin
       .firestore()
       .collection('profiles')
       .doc(profileCode);
 
-    // Obtén el perfil actual para verificar los roles existentes
-    const currentProfile = await profileRef.get();
+    // Lectura, comprobacion y escritura en una transaccion: si el perfil cambia
+    // entre medias, Firestore la repite con los datos nuevos
+    const result = await db.runTransaction(async (transaction) => {
+      const currentProfile = await transaction.get(profileRef);
 
-    // Obtiene los roles actuales del perfil
-    let currentRoles = currentProfile.data().role || [];
+      if (!currentProfile.exists) {
+        return { status: 404, body: { error: 'Profile not found' } };
+      }
 
-    // Verifica si profileIsAdmin o profileIsTrainer son true en el formData
-    const isAdmin = formData.profileIsAdmin === true;
-    const isTrainer = formData.profileIsTrainer === true;
+      // Un panel con datos viejos no puede pisar la membresia (renovaciones,
+      // descongelamientos o cambios de otro administrador)
+      const conflicts = findMembershipConflicts(
+        currentProfile.data(),
+        formData,
+        originalValues
+      );
 
-    // Elimina 'admin' del array de roles si isAdmin es false y está en el array
-    if (!isAdmin && currentRoles.includes('admin')) {
-      currentRoles = currentRoles.filter((role) => role !== 'admin');
-    }
+      if (conflicts.length) {
+        const saved = currentProfile.data();
+        return {
+          status: 409,
+          body: {
+            code: 'PROFILE_CHANGED',
+            error:
+              'This member was updated by someone else while this window was open. Please reload the member and try again.',
+            fields: conflicts,
+            // Para que el panel explique que cambio, quien y cuando, y se
+            // ponga al dia sin volver a pedir el perfil
+            changes: describeMembershipChanges(
+              saved,
+              formData,
+              originalValues,
+              conflicts
+            ),
+            lastChange: describeLastChange(saved),
+            latest: MEMBERSHIP_STATE_FIELDS.reduce((acc, field) => {
+              if (saved[field] !== undefined) {
+                acc[field] = DATE_STATE_FIELDS.includes(field)
+                  ? formatDate(saved[field])
+                  : saved[field];
+              }
+              return acc;
+            }, {}),
+          },
+        };
+      }
 
-    // Elimina 'trainer' del array de roles si isTrainer es false y está en el array
-    if (!isTrainer && currentRoles.includes('trainer')) {
-      currentRoles = currentRoles.filter((role) => role !== 'trainer');
-    }
+      const update = buildProfileUpdate(currentProfile, formData);
+      if (update.error) {
+        return { status: 400, body: { error: update.error } };
+      }
 
-    // Agrega 'admin' al array de roles si isAdmin es true y aún no está en el array
-    if (isAdmin && !currentRoles.includes('admin')) {
-      currentRoles.push('admin');
-    }
+      // Si este guardado cambia la membresia, queda constancia de quien fue
+      const nextProfile = { ...currentProfile.data(), ...update.data };
+      if (membershipChanged(currentProfile.data(), nextProfile)) {
+        update.data.membershipLastChange = buildMembershipStamp(
+          'Profile edited',
+          changedBy,
+          nextProfile
+        );
+      }
 
-    // Agrega 'trainer' al array de roles si isTrainer es true y aún no está en el array
-    if (isTrainer && !currentRoles.includes('trainer')) {
-      currentRoles.push('trainer');
-    }
-
-    // Si ni isAdmin ni isTrainer son true, y el array de roles está vacío, devuelve un error
-    if (!isAdmin && !isTrainer && currentRoles.length === 0) {
-      return res
-        .status(400)
-        .json({ error: 'Cannot leave a person without a role' });
-    }
-
-    // Actualiza el documento con los datos proporcionados en formData
-    await profileRef.update({
-      ...formData,
-      role: currentRoles,
-      profileIsAdmin: isAdmin,
-      profileIsTrainer: isTrainer,
+      transaction.update(profileRef, update.data);
+      return { status: 200 };
     });
+
+    if (result.status !== 200) {
+      if (result.status === 409) {
+        console.warn(
+          `[updateProfile] stale save rejected for ${profileCode}:`,
+          result.body.fields.join(', ')
+        );
+      }
+      return res.status(result.status).json(result.body);
+    }
 
     res.json({ message: 'Profile record updated successfully', formData });
   } catch (error) {
@@ -444,6 +513,52 @@ const updateProfile = async (req, res) => {
       .status(500)
       .json({ error: 'Error updating profile', message: error.message });
   }
+};
+
+// Calcula los roles a partir de profileIsAdmin / profileIsTrainer y arma la
+// actualizacion con los datos del formulario
+const buildProfileUpdate = (currentProfile, formData) => {
+  // Obtiene los roles actuales del perfil
+  let currentRoles = currentProfile.data().role || [];
+
+  // Verifica si profileIsAdmin o profileIsTrainer son true en el formData
+  const isAdmin = formData.profileIsAdmin === true;
+  const isTrainer = formData.profileIsTrainer === true;
+
+  // Elimina 'admin' del array de roles si isAdmin es false y está en el array
+  if (!isAdmin && currentRoles.includes('admin')) {
+    currentRoles = currentRoles.filter((role) => role !== 'admin');
+  }
+
+  // Elimina 'trainer' del array de roles si isTrainer es false y está en el array
+  if (!isTrainer && currentRoles.includes('trainer')) {
+    currentRoles = currentRoles.filter((role) => role !== 'trainer');
+  }
+
+  // Agrega 'admin' al array de roles si isAdmin es true y aún no está en el array
+  if (isAdmin && !currentRoles.includes('admin')) {
+    currentRoles.push('admin');
+  }
+
+  // Agrega 'trainer' al array de roles si isTrainer es true y aún no está en el array
+  if (isTrainer && !currentRoles.includes('trainer')) {
+    currentRoles.push('trainer');
+  }
+
+  // Si ni isAdmin ni isTrainer son true, y el array de roles está vacío, devuelve un error
+  if (!isAdmin && !isTrainer && currentRoles.length === 0) {
+    return { error: 'Cannot leave a person without a role' };
+  }
+
+  // Actualiza el documento con los datos proporcionados en formData
+  return {
+    data: {
+      ...formData,
+      role: currentRoles,
+      profileIsAdmin: isAdmin,
+      profileIsTrainer: isTrainer,
+    },
+  };
 };
 
 // const profileRef = admin
@@ -592,6 +707,7 @@ const freezeMembership = async (req, res) => {
   try {
     const { profileId, profileFrozen, profileFrozenStartDate, gymId } =
       req.body;
+    const changedBy = req.staff;
 
     // Verifica que el perfil exista y realice las validaciones necesarias
 
@@ -603,16 +719,20 @@ const freezeMembership = async (req, res) => {
     // Obtiene el membershipId del documento del perfil
     const { membershipId } = profileSnapshot.data();
 
+    const freezeUpdate = {
+      profileFrozen: profileFrozen,
+      profileFrozenStartDate: new Date().toISOString().slice(0, 10),
+      profileStatus: false,
+      profileUnFrozen: false,
+    };
+    freezeUpdate.membershipLastChange = buildMembershipStamp(
+      'Freeze',
+      changedBy,
+      { ...profileSnapshot.data(), ...freezeUpdate }
+    );
+
     // Actualiza los campos en el perfil seleccionado
-    await db
-      .collection('profiles')
-      .doc(profileId)
-      .update({
-        profileFrozen: profileFrozen,
-        profileFrozenStartDate: new Date().toISOString().slice(0, 10),
-        profileStatus: false,
-        profileUnFrozen: false,
-      });
+    await db.collection('profiles').doc(profileId).update(freezeUpdate);
 
     const paymentHistoryRef = db.collection('paymentHistory');
     const newPaymentHistoryDoc = paymentHistoryRef.doc();
@@ -653,6 +773,7 @@ const unfreezeMembership = async (req, res) => {
       profileFrozenReason,
       profileUnfreezeExpirationDate,
     } = req.body;
+    const changedBy = req.staff;
 
     const profileSnapshot = await db
       .collection('profiles')
@@ -661,8 +782,7 @@ const unfreezeMembership = async (req, res) => {
     // Obtiene el membershipId del documento del perfil
     const { membershipId } = profileSnapshot.data();
 
-    // Actualiza los campos en el perfil seleccionado para descongelar la membresía y establece las fechas de descongelación
-    await db.collection('profiles').doc(profileId).update({
+    const unfreezeUpdate = {
       profileFrozen: false, // Establece profileFrozen en false para descongelar
       profileUnFreezeDate: profileUnFreezeDate, // Almacena profileUnFreezeStartDate
       profileUnFreezeFee: profileUnFreezeFee, // Almacena profileUnFreezeEndDate
@@ -672,7 +792,15 @@ const unfreezeMembership = async (req, res) => {
       profileStatus: true,
       profileUnFrozen: true,
       profileEndDate: profileUnfreezeExpirationDate,
-    });
+    };
+    unfreezeUpdate.membershipLastChange = buildMembershipStamp(
+      'Unfreeze',
+      changedBy,
+      { ...profileSnapshot.data(), ...unfreezeUpdate }
+    );
+
+    // Actualiza los campos en el perfil seleccionado para descongelar la membresía y establece las fechas de descongelación
+    await db.collection('profiles').doc(profileId).update(unfreezeUpdate);
 
     const paymentHistoryRef = db.collection('paymentHistory');
     const newPaymentHistoryDoc = paymentHistoryRef.doc();
@@ -786,6 +914,7 @@ const checkCardForUpdated = async (req, res) => {
 const updateProfileEndDate = async (req, res) => {
   const { profileId } = req.params;
   const { profilReneweData, gymId } = req.body;
+  const changedBy = req.staff;
 
   try {
     // Check if the profile already exists
@@ -841,8 +970,20 @@ const updateProfileEndDate = async (req, res) => {
       ? buildProfileFromRenewal(renewMembershipInQueue, today)
       : { renewMembershipInQueue };
 
+    // Si la renovacion se aplica ya, queda constancia de quien la hizo (en la
+    // misma escritura; no se devuelve al panel)
+    const profileWrite = renewalApplied
+      ? {
+          ...profileUpdate,
+          membershipLastChange: buildMembershipStamp('Renewal', changedBy, {
+            ...profileData,
+            ...profileUpdate,
+          }),
+        }
+      : profileUpdate;
+
     // Store the renewal in the user's profile (queued or already applied)
-    await profileRef.set(profileUpdate, { merge: true });
+    await profileRef.set(profileWrite, { merge: true });
 
     const paymentHistoryRef = db.collection('paymentHistory');
     const newPaymentHistoryDoc = paymentHistoryRef.doc();

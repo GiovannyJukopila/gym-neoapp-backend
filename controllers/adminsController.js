@@ -7,6 +7,8 @@ app.use(bodyParser.json());
 const Profile = require('../models/profile');
 
 const admin = require('firebase-admin');
+const { revokeProfile } = require('../utils/revokedProfiles');
+const { forgetStaff } = require('../middlewares/staffAuth');
 
 const createAdmin = async (req, res) => {
   try {
@@ -205,9 +207,129 @@ const getPermissions = async (req, res) => {
   }
 };
 
+// ---- Eliminar admins (solo Master Admin) ----
+
+const NEOAPP_ROLES = ['masteradmin', 'superadmin'];
+const fullName = (profile) =>
+  [profile.profileName, profile.profileLastname].filter(Boolean).join(' ');
+
+/**
+ * Comprueba si quien pide (req.staff) puede eliminar a este perfil.
+ * Devuelve { status, error } si no puede.
+ */
+const checkCanDelete = (staff, profileId, profile) => {
+  if (!profile) return { status: 404, error: 'Admin not found' };
+  if (profileId === staff.profileId) {
+    return { status: 400, error: 'You cannot delete your own account.' };
+  }
+  const roles = Array.isArray(profile.role) ? profile.role : [];
+  if (!profile.profileIsAdmin && !roles.includes('admin')) {
+    return { status: 400, error: 'This person is not an admin.' };
+  }
+  if (
+    Number(profile.profileAdminLevel) >= 3 ||
+    roles.some((role) => NEOAPP_ROLES.includes(role))
+  ) {
+    return { status: 403, error: 'NeoApp accounts cannot be deleted here.' };
+  }
+  if (!staff.isNeoApp && profile.gymId !== staff.gymId) {
+    return { status: 403, error: 'This admin belongs to another gym.' };
+  }
+  return null;
+};
+
+// Clases de hoy en adelante que imparte esta persona como trainer
+const countUpcomingClasses = async (profileId) => {
+  const snapshot = await db
+    .collection('classes')
+    .where('selectTrainer', '==', profileId)
+    .select('eventDate')
+    .get();
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+  return snapshot.docs.filter((doc) => {
+    const date = new Date(doc.data().eventDate);
+    return !isNaN(date.getTime()) && date >= startOfToday;
+  }).length;
+};
+
+// Lo que el panel muestra antes de confirmar el borrado
+const getDeletePreview = async (req, res) => {
+  try {
+    const { profileId } = req.params;
+    const snapshot = await db.collection('profiles').doc(profileId).get();
+    const profile = snapshot.exists ? snapshot.data() : null;
+
+    const denied = checkCanDelete(req.staff, profileId, profile);
+    if (denied) return res.status(denied.status).json({ error: denied.error });
+
+    const roles = Array.isArray(profile.role) ? profile.role : [];
+    res.json({
+      profileId,
+      name: fullName(profile),
+      email: profile.profileEmail || '',
+      roles,
+      isMember: roles.includes('member'),
+      isTrainer: roles.includes('trainer'),
+      cardSerialNumber: profile.cardSerialNumber || '',
+      upcomingClasses: roles.includes('trainer')
+        ? await countUpcomingClasses(profileId)
+        : 0,
+    });
+  } catch (error) {
+    console.error('Error preparing admin deletion:', error);
+    res.status(500).json({ error: 'Error preparing admin deletion' });
+  }
+};
+
+/**
+ * Elimina el perfil completo del admin (decision del gimnasio): deja libre su
+ * tarjeta, invalida su sesion y queda en la actividad con sus datos basicos.
+ */
+const deleteAdmin = async (req, res) => {
+  try {
+    const { profileId } = req.params;
+    const profileRef = db.collection('profiles').doc(profileId);
+
+    const result = await db.runTransaction(async (transaction) => {
+      const snapshot = await transaction.get(profileRef);
+      const profile = snapshot.exists ? snapshot.data() : null;
+
+      const denied = checkCanDelete(req.staff, profileId, profile);
+      if (denied) return denied;
+
+      const cardRef = profile.cardSerialNumber
+        ? db.collection('cards').doc(String(profile.cardSerialNumber))
+        : null;
+      const card = cardRef ? await transaction.get(cardRef) : null;
+
+      transaction.delete(profileRef);
+      if (card?.exists && card.data().cardStatus === 'active') {
+        transaction.update(cardRef, { cardStatus: 'inactive' });
+      }
+      return { status: 200, profile };
+    });
+
+    if (result.status !== 200) {
+      return res.status(result.status).json({ error: result.error });
+    }
+
+    await revokeProfile(profileId);
+    forgetStaff(profileId);
+
+    // La actividad guarda el perfil borrado completo (utils/activityCapture.js)
+    res.json({ message: 'Admin deleted', profileId });
+  } catch (error) {
+    console.error('Error deleting admin:', error);
+    res.status(500).json({ error: 'Error deleting admin' });
+  }
+};
+
 module.exports = {
   createAdmin,
   getAdmins,
   searchAdmin,
   getPermissions,
+  getDeletePreview,
+  deleteAdmin,
 };

@@ -20,9 +20,15 @@ const usersInterfaceRouter = require('./usersInterface.router');
 const pushNotificationRouter = require('./pushNotification.router');
 const internetConnectionRouter = require('./internetConnection.router');
 const estoreRouter = require('./estore.router');
+const activityRouter = require('./activity.router');
+const activityTrail = require('../middlewares/activityTrail');
 
 const router = express.Router();
 //app.use('/api/v1', router);
+
+// Registra lo que hace el staff (ver utils/activityCatalog.js)
+router.use(activityTrail);
+
 router.use('/gyms', gymsRouter);
 router.use('/scan', scanRouter);
 router.use('/memberships', membershipRouter);
@@ -43,5 +49,6 @@ router.use('/users', usersInterfaceRouter);
 router.use('/pushNotification', pushNotificationRouter);
 router.use('/internetConnection', internetConnectionRouter);
 router.use('/estore', estoreRouter);
+router.use('/activity', activityRouter);
 
 module.exports = router;

@@ -20,6 +20,12 @@ const {
 } = require('../controllers/profileController');
 const multer = require('multer');
 const verifyToken = require('../middlewares/authMiddleware');
+const { requireStaff } = require('../middlewares/staffAuth');
+
+// Los paneles antiguos aun abiertos no envian el token al renovar, congelar o
+// descongelar: se aceptan mientras se actualizan (ver middlewares/staffAuth.js)
+const staffOnly = requireStaff();
+const staffOnlyDuringRollout = requireStaff({ allowMissingToken: true });
 
 const storage = multer.memoryStorage(); // Almacena el archivo en memoria
 const upload = multer({ storage: storage });
@@ -46,19 +52,23 @@ router.post('/get/profileByEmail', getProfileByEmail);
 
 router.post('/create', createProfile);
 
-router.post('/update', updateProfile);
+router.post('/update', staffOnly, updateProfile);
 
 router.post('/uploadFile', upload.single('profileFile'), uploadFile);
 
-router.post('/freeze-membership', freezeMembership);
+router.post('/freeze-membership', staffOnlyDuringRollout, freezeMembership);
 
-router.post('/unfreeze-membership', unfreezeMembership);
+router.post('/unfreeze-membership', staffOnlyDuringRollout, unfreezeMembership);
 
 router.post('/checkCardAvailability', checkCardAvailability);
 
 router.post('/checkCardForUpdated', checkCardForUpdated);
 
-router.post('/updateProfileEndDate/:profileId', updateProfileEndDate);
+router.post(
+  '/updateProfileEndDate/:profileId',
+  staffOnlyDuringRollout,
+  updateProfileEndDate
+);
 
 router.delete('/deleteFile', deleteFile);
 

@@ -16,6 +16,26 @@ const {
 } = require('./controllers/userInterfaceController');
 
 const { db } = require('./firebase');
+const { runSystemTask } = require('./utils/activityEntry');
+
+// Lo que cambia el proceso diario queda en la actividad como "NeoApp (automatic)"
+const DAILY_TASKS = {
+  memberships: {
+    action: 'membership.autoUpdated',
+    category: 'members',
+    docSummary: 'updated automatically the membership of',
+  },
+  penalties: {
+    action: 'penalty.autoApplied',
+    category: 'members',
+    docSummary: 'applied automatically a no-show penalty:',
+  },
+  penaltiesEnded: {
+    action: 'penalty.autoEnded',
+    category: 'members',
+    docSummary: 'ended automatically a penalty:',
+  },
+};
 const port = process.env.PORT || 3000;
 const path = require('path');
 
@@ -64,13 +84,18 @@ const dailyJob = cron.schedule(
 
     for (const gymId of gymIds) {
       try {
-        const summary = await setInactiveMembers(gymId);
+        const summary = await runSystemTask(DAILY_TASKS.memberships, () =>
+          setInactiveMembers(gymId)
+        );
         console.log('[cron] memberships updated', summary);
 
-        await updateTotalAmountByMonth(gymId);
-        await getCurrentMembersByMemberships(gymId);
-        await penalizeNoShows(gymId);
-        await checkAndDeactivatePenalties(gymId);
+        // Estadisticas: sus campos no se registran (ver utils/activityDiff.js)
+        await runSystemTask(null, () => updateTotalAmountByMonth(gymId));
+        await runSystemTask(null, () => getCurrentMembersByMemberships(gymId));
+        await runSystemTask(DAILY_TASKS.penalties, () => penalizeNoShows(gymId));
+        await runSystemTask(DAILY_TASKS.penaltiesEnded, () =>
+          checkAndDeactivatePenalties(gymId)
+        );
       } catch (error) {
         // Un gimnasio que falle no debe abortar los demas
         console.error(`[cron] Error processing gym ${gymId}:`, error.message);
